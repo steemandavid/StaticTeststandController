@@ -1,0 +1,429 @@
+Put yourself in planning mode. You are a software analyst/architect that is assigned to translate requirements into a functional specifications document.
+
+Let's write a Functional Specifications Document for a new project called StaticTeststandController. 
+Write this as a full FSD that I can give to Claude Code / Automaker. Automaker's first task should be to split the FSD into separate Features and put them on the Kanban board for later development. 
+
+Prompt me if there are any missing details, inconsistencies, missing details or other questions. We can then clarify and complete the FSD together.
+
+
+
+# PROJECT GOAL
+The project goal is to develop firmware to run on 2 separate pieces of hardware;
+- the BASE is connected to the static test stand's sensors and will sample data from different sources and store them locally on an SD card.
+- the REMOTE is a handheld unit the user interfaces with, and will be used to control the base and to verify system status
+- the BASE and REMOTE unit communicate using the ESPNOW protocol over the ESP's built in wifi radio.
+
+Together they form a test system to static test rocket motors. Typical workflow:
+- calibrate the unit (done once)
+- testing igniter continuity (before each test)
+- ignite the motor
+- read samples during the burn and store to SD card
+- finish the test
+- provide status updates throughout
+
+
+# Architecture
+
+This project should compile in ESP-IDF on ESP32-S3. It should use a standard RTOS such as FreeRTOS to run concurrent tasks. It should use debugging through ESP_LOG statements. 
+
+The project should commit to a new repository on my github. It should use version control, maintain a todo-list for Claude Code and Automaker, and maintain proper documentation. 
+
+If separate code for the BASE and REMOTE unit is needed then that's fine. If the same codebase can be re-used for both (distincion made based on #define statement) then that's even better.
+
+The hardware is based on standard ESP32-S3 development boards. e.g. https://www.otronic.nl/en/esp32-s3-n16r8-devboard-16mb-flash-en-8mb-psram.html, https://github.com/microrobotics/ESP32-S3-N16R8/blob/main/ESP32-S3-N16R8_User_Guide.pdf
+
+
+
+# Example 
+I made an earlier attempt at implementing this project, you can learn from the project files:
+https://github.com/steemandavid/static-test-stand-base
+https://github.com/steemandavid/static-test-stand-remote
+
+
+
+# BASE unit
+This unit consists of an ESP32-S3 devboard with associated hardware: 
+- an AS1256 ADC chip reads a load cell (thrust) and pressure transducer (chamber pressure), as well as break wires and igniter continuity.
+- an SD card stores samples
+- a DS1307 RTC module stores time and date, so that the correct time and date of each test can be stored on the SD card
+- a FET output to fire an igniter (xxx how + current sense how?)
+
+// I/O defines
+#define SD_CS 10
+#define SD_MOSI 9
+#define SD_CLK 12
+#define SD_MISO 13
+#define LED_BUILTIN 2 // for ESP32 devboard
+#define LOW_SIDE_POWER 40 // LOW side power voor de igniter. Safe state = low (off)
+#define IGNITION 41 // stroomvoorziening voor de igniter.  Safe state = low (off)
+#define IGNITER_SENSE 2 // series resitor sampling the current through the igniter.
+#define BUZZER 42 // buzzer. Safe state = low (off)
+#define ADS_DN 35
+#define ADS_SCLK 36
+#define ADS_DOUT 37
+#define ADS_RST 38
+#define ADS_CS 39
+#define ADS_DRDY 40
+#define RTC_SDA 8
+#define RTC_SCL 9
+#define RTC_DS 3
+#define RGB_LED 47 // built-in LED (Neopixel?)
+#define BOOT_BUTTON 0 // built-in pushbutton
+
+
+# REMOTE unit
+This unit consists of an ESP32-S3 module with associated hardware: 
+- a 0.96" OLED module with SSD1306 chip to display information
+- a button with built-in LED for control
+- an arm switch to switch between safe/armed states
+- a buzzer for auditive feedback
+- a voltage divider to measure battery voltage
+
+// I/O defines
+#define BUTTON_BUTTON 16
+#define LED_BUTTON 17
+#define SWITCH_ARMED 4 // internal pull up, low when active. 
+#define SWITCH_SAFE 5 // internal pull up, low when active. The BASE is in safe mode, no static test can begin. The LOW_SIDE_POWER is low and IGNITION is low. Both cannot be activated in this state. The LED_BUTTON is green.
+#define LED_BUILTIN 32 // for ESP32 devboard
+#define BUZZER 25
+#define VOLT_BAT 1 // battery voltage = LiPo battery voltage fed through a voltage divider into an ADC input pin. Propose suitable resistor values.
+#define I2C_SDA 8 // standard ESP32 is 21
+#define I2C_SCL 9 // standard ESP32 is 22
+#define RGB_LED 47 // built-in LED (Neopixel?)
+#define BOOT_BUTTON 0 // built-in pushbutton
+
+SWITCH_ARMED and SWITCH_SAFE are opposite sides of the same toggle switch. This means that, if either one is high, the other should be low. Anything else is an error condition. Except during a running test (states STARTTEST, IGNITION or TESTRUNNING), it should send a HALT command to the Base unit and trigger an "Arm/safe error" which is added to the logging on the display.
+
+
+# De BASE state machine
+
+De BASE implementeert een state machine met de volgende staten:
+
+## INIT // the base unit is initializing
+First of all, switch off IGNITION, LOW_SIDE_POWER and BUZZER.
+If SWITCH_SAFE is not active, signal an error condition and HALT. User will need to reset by power cycling the remote.
+Initialize all hardware and communications.
+Read settings from SD card file.
+At start-up, the base should look for WIFI_NETWORK_SSID and connect to it when available. If connected, fetch the current time and date over NTP and update it to the RTC module. If the unit succesfully retrieve the time from NTP, beep the buzzer twice.
+Beep the buzzer twice for 500ms to signal start-up.
+Move to IDLE state.
+
+## IDLE // the base unit is idle, doing nothing
+Listen for incoming commands from the remote and react accordingly.
+SWITCH_SAFE should be active. 
+- If SWITCH_SAFE is deactivated and SWITCH_ARMED is activated, switch to ARMED state. Consider switch-over delay and switch bounce effects.
+- While SWITCH_SAFE is activated, and each time a Ignition button press command is received, cycle through the CheckIgniter, CheckBreakwires, CalibrateLoadcell, CalibratePressure states.
+
+## ARMED // the base unit is in armed state
+Start the BUZZER to signal armed mode. 
+Switch on LOW_SIDE_POWER to the igniter.
+Report status to remote unit (xxx command + text "Base armed").
+Wait for an Ignition button long press command from the remote, which signals that the user wants to start the test. Move to STARTTEST state.
+
+## STARTTEST // the static test has started
+Get the current time and date from the RTC. Use it to create a new file for the test in the format yyyy-mm-dd-hh-mm-ss.csv
+Start logging to SD card. See Data Logging.
+Switch off buzzer.
+Report status to remote unit (xxx command + text "Test started").
+Move to IGNITION state.
+When a Safe switch long press command is received, switch to state IDLE
+
+## IGNITION // the base unit is initiating an ignition command
+Report status to remote unit (xxx command + text "Igniter on").
+Start logging samples to SD card.
+Power on the IGNITER for IGNITER_ON_TIME seconds.
+Switch off LOW_SIDE_POWER to the igniter.
+Report status to remote unit (xxx command + text "Igniter off").
+When a Safe switch long press command is received, switch to state IDLE
+Move to TESTRUNNING state.
+
+## TESTRUNNING // the test is ongoing. Log sample data to SD and detect the end of the test
+Continuously log samples to SD card.
+Report status to remote unit (xxx command + text "Test running").
+To detect the end of the test, check if the ADC_PORT_LOADCELL and ADC_PORT_PRESSURE_TRANSDUCER fall back to a low value for END_TEST_DELAY seconds. They might not completely fall back to zero, so an inteligent alogrithm is needed to reliably detect the end of the test. When the test has ended, move to state ENDTEST
+When a Safe switch long press command is received, switch to state IDLE
+
+## ENDTEST // the test has ended
+Stop logging, close SD card file.
+Sound buzzer for 1 seconds.
+Move to state HALT.
+
+## HALT // freeze the program, user will need to reset 
+Het testsysteem wordt gestopt. Alle open files worden gesloten, de outputs worden in een safe state gezet en een melding wordt naar de remote gestuurd.
+
+## CheckIgniter // the base is checking the state / continuity of the igniter
+Continously samples ADC_PORT_IGNITER and relays it to the REMOTE for display at a rate of one time per second. This allows the user to see if the igniter is connected correctly.
+When a Ignition button short press command is received, switch to state CheckBreakwires
+When a Arm switch long press command is received, switch to state ARMED
+
+## CheckBreakwires // the base is checking the state / continuity of the break wires
+Continously samples ADC_PORT_BREAKWIRE1 through 4, and relays to the remote the values of the 4 break wires.
+When a Ignition button short press command is received, switch to state CalibrateLoadcell
+When a Arm switch long press command is received, switch to state ARMED
+
+## CalibrateLoadcell // the base is in calibration mode
+Continously samples the value of the ADC_PORT_LOADCELL port and relays it to the REMOTE for display at a rate of one time per second. This allows the user to calibrate the load cell using known weights.
+When a Ignition button short press command is received, switch to state CalibratePressure
+When a Arm switch long press command is received, switch to state ARMED
+
+## CalibratePressure // the base is in calibration mode
+Continously samples the value of the ADC_PORT_PRESSURE_TRANSDUCER port and relays it to the REMOTE for display at a rate of one time per second. This allows the user to calibrate the load cell using known pressure.
+When a Ignition button short press command is received, switch to state IDLE
+When a Arm switch long press command is received, switch to state ARMED
+
+## WelcomeScreen // display a welcome screen at startup
+Shows a welcome screen, showing the project title, the author, the firmware version and date.
+
+
+The state machine should keep a string array variable in which the text values corresponding to the different states are stored. e.g. const String StateText[30] = {"Init", "Idle", "Armed", "Ignition", "StartTest", "TestRunning", "EndTest", "CalibrateLoadcell", "CalibratePressure", "CheckBreakwires", "WelcomeScreen"};
+
+
+# SETTINGS
+Settings are stored in a file on the SD card. The filename is settings.txt. This file should be user editable on a laptop. The settings file is read in the INIT state.
+Example:
+IGNITER_ON_TIME 0.5 // amount of seconds the igniter will be powered during ignition
+ADC_PORT_LOADCELL 0 // ADC port on th AS1256
+ADC_PORT_PRESSURE_TRANSDUCER 1 // ADC port on th AS1256
+ADC_PORT_IGNITER_SENSE 2 // ADC port on th AS1256
+ADC_PORT_BREAKWIRE1 3 // ADC port on th AS1256
+ADC_PORT_BREAKWIRE2 4 // ADC port on th AS1256
+ADC_PORT_BREAKWIRE3 5 // ADC port on th AS1256
+ADC_PORT_BREAKWIRE4 6  // ADC port on th AS1256
+WIFI_NETWORK_SSID politiezone-0526 // SSID for wifi to sync time using NTP
+WIFI_NETWORK_PASSWORD draad-doorknippen
+ADC_SAMPLE_RATE 1000 // sample rate in Hz
+ADC_CAL_VALUE_LOADCELL  // a value used to convert from sampled ADC value to kg. formula: value in kg = ADC value * ADC_CAL_VALUE_LOADCELL
+ADC_CAL_VALUE_PRESSURE_TRANSDUCER // similar to ADC_CAL_VALUE_LOADCELL, but for the pressure transducer and in bar.
+ADC_CAL_VALUE_IGNITER // similar to ADC_CAL_VALUE_LOADCELL, but for the pressure transducer and in volts.
+ADC_CAL_VALUE_BREAKWIRE1
+ADC_CAL_VALUE_BREAKWIRE2
+ADC_CAL_VALUE_BREAKWIRE3
+ADC_CAL_VALUE_BREAKWIRE4
+COMMS_WARNING 2 // when a packet isn't received / confirmed for x seconds, give a communications warning
+COMMS_ERROR 5 // when a packet isn't received / confirmed for x seconds, give a communications error and shut down the test system
+END_TEST_DELAY 5 // if load cell and/or pressure fall back close to zero for x seconds, consider the test ended
+
+
+# Data logging
+Sampled data should be logged to a .csv file.
+The date and time from the RTC module should be used to create a new file for the test in the format yyyy-mm-dd-hh-mm-ss.csv
+Inside this file should be a header which should include:
+- "Static test started"
+- the current state machine code and text (from StateText)
+- date and time
+- Settings used for the test
+
+The .csv file should include the following data for each sample:
+- timestamp (first value is 0, afterwards increased by ADC_SAMPLE_RATE for every sample)
+- load cell value = read value of ADC_PORT_LOADCELL * ADC_CAL_VALUE_LOADCELL
+- pressure transducer value = read value of ADC_PORT_PRESSURE_TRANSDUCER * ADC_CAL_VALUE_PRESSURE_TRANSDUCER
+- igniter value = read value of ADC_PORT_IGNITER * ADC_CAL_VALUE_IGNITER
+- breakwire 1 value = read value of ADC_PORT_BREAKWIRE1 * ADC_CAL_VALUE_BREAKWIRE1
+- breakwire 2 value = similar to breakwire 1
+- breakwire 3 value = similar to breakwire 1
+- breakwire 4 value = similar to breakwire 1
+
+At the end of the file should be a summary of:
+- the state of the state machine + corresponding text at the end of the test (from StateText)
+- How long the test ran in seconds, with ms accuracy
+- The maximum thrust recorded
+- The total thrust recorded = integration of all test values
+- The maximum pressure that was recorded.
+
+Keep a log of all actions, warnings and error conditions in all states to a file runlog.txt. Prefix each file by a timestamp (date and time).
+
+
+# De REMOTE logica
+
+De REMOTE draait een eenvoudige logica, gebaseerd op wat er wordt uitgewisseld in het ESP-NOW communications protocol.
+- Op output, communication en display commands wordt gereageerd met de corresponderende lokale actie
+- Op lokale inputs wordt gereageerd door een input command te verzenden naar de BASE unit.
+
+Verduidelijking:
+- Ping, Comms link warning en Comms link error: zie de beschrijving bij Ping
+- Remote battery warning en Remote battery critical: wanneer het batterijpercentage zakt onder 30% wordt een Remote battery critical commando verstuurd naar de BASE unit, en wordt lokaal de buzzer elke seconde voor 100ms aangezet. Onder de 10% wordt een Remote battery critical command verstuurd, en wordt de buzzer vast aangezet. In beide gevallen wordt een lijn aan de logging van de remote toegevoegd die het batterijpercentage aangeeft.
+
+
+# Het REMOTE display
+
+De REMOTE unit heeft een OLED display. Dit is verdeeld in verschillende lijnen. De bovenste lijn heeft een andere kleur en is een statuslijn. Links staat de huidige STATE van de BASE state machine. Rechts staat de RSSI die de kwaliteit van de communicatielink aangeeft (enkel een getal xx zonder verdere unit aanduiding).
+De lijnen eronder zijn logging lijnen. Hierop komen boodschappen binnen van de BASE unit. De nieuwe boodschap verschijnt telkens op de 2de lijn van het display. De reeds bestaande lijnen scrollen naar onder om plaats te maken. De onderste lijn valt van het display af.
+
+De instelling van het display zijn:
+// SSD1306 OLED display
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+Dit is de code die momenteel gebruikt wordt om de data op het display te krijgen. Gebruik dit om de schermindeling, plaatsing van de data en de lettergroote en uitlijnin te achterhalen.
+      display.clearDisplay();
+      display.drawLine(0, 16, SCREEN_WIDTH, 16, WHITE);  // Horizontal line at the top of the blue area of the screen 
+      display.drawLine(0, 17, SCREEN_WIDTH, 17, WHITE);  // Horizontal line at the top of the blue area of the screen 
+      display.setTextSize(2); // set the font size, supports sizes from 1 to 8
+      display.setCursor(0, 0);
+      display.print(DisplayParamsCurrent.BaseState);
+      if (DisplayParamsCurrent.TxRxFails<=9999) {
+        display.setCursor(SCREEN_WIDTH-((DisplayParamsCurrent.TxRxFails==0?1:(int)log10(DisplayParamsCurrent.TxRxFails)+1)*12)-12, 0); // Align to the right of the screen
+        display.print(DisplayParamsCurrent.TxRxFails);
+      } else {
+        DisplayParamsCurrent.TxRxFails=0; // reset counter
+      }
+//      display.print("o");
+      display.setTextSize(1); // set the font size, supports sizes from 1 to 8
+      for (int i=0; i<5; i++) { // Display line 2 through 6
+        display.setCursor(0, 11+9*(i+1)); // put cursor on the correct y position for the respective line
+        display.print(DisplayParamsCurrent.Line[i]); // print text
+      }
+
+
+
+
+# ESP-NOW communications protocol
+The base and remote unit should communicate with each other over ESP-NOW. 
+// Remote control MAC Address: 10:97:bd:cc:ed:bc
+// Static test stand MAC Address: e4:65:b8:25:8a:a0
+
+## Uitgangspunten
+
+De BASE unit is leidend in het doorlopen van het programma. De REMOTE is slechts een afstandsbediening die output van de BASE weergeeft en input doorgeeft naar de BASE.
+
+
+## Packet structure
+
+**BaseState**: an int8 containing the current state of the base station 
+**Command**: an int8 containing a command
+
+Output commands:
+- Button LED on for x seconds
+- Button LED off
+- Button LED blink
+- Buzzer on for x seconds 
+- Buzzer off
+- Buzzer blink
+- Built-in LED on for x seconds 
+- Built-in LED off
+- Built-in LED blink 
+For each of these, either the number of seconds on or the number of times to blink is passed in the data variable.
+
+Input commands:
+- Safe switch short press
+- Safe switch long press
+- Arm switch short press
+- Arm switch long press
+- Ignition button short press
+- Ignition button long press
+- Ignition button double press
+- Remote battery warning
+- Remote battery critical
+
+Display commands
+- Clear display
+- Add display log line
+
+Communication commands
+- Ping
+- Comms link warning
+- Comms link error
+
+**Message[21]**: a char array containing the message data payload, allowing the base to send a string of data to the remote. MAx length that can be displayed is 21 characters.
+
+
+## Ping 
+De REMOTE stuurt elke seconde een ping naar de BASE. De BASE antwoordt. De REMOTE laat op het OLED display het gewogen gemiddelde RSSI van de laatste 5 ontvangen pakketten zien zodat de gebruiker een indicatie heeft van de sterkte van de communicatieverbinding. Als de gemiddelde RRSI onder een bepaalde waarde zakt voor COMMS_WARNING seconden dan laat de REMOTE een waarschuwing zien op het OLED display. Als de gemiddelde RRSI onder een bepaalde waarde zakt voor COMMS_ERROR seconden dan wordt een foutmelding gegeven en wordt het testsysteem gestopt (HALT state).
+
+
+# Software Development phases
+** Phase 1: MVP
+- Base and remote can boot and communicate with each others.
+- Remote can read BUTTON_BUTTON, SWITCH_ARMED and SWITCH_SAFE states, display messages on OLED display and sound the BUZZER and switch on LED_BUTTON. 
+- State machines run correctly.
+
+## Phase 2: ADC read and logging to SD
+- Base can read ADC samples and write to SD card. State machine logic is updated to accomodate this.
+
+## Phase 3: time synchronisation
+- Base connects to WIFI_NETWORK_SSID, syncs time and date over NTP and updates the RTC module.
+
+## Phase 4: calibration
+- Calibration procedures now work using the relevant settings in the settings file.  State machine logic is updated to accomodate this.
+
+## Extended features, to be included in the FSD and features list but not to be developed yet until explicitely asked
+- Auto power off: a FET is installed between the power supply and the ESP32. In parallel with the FET is a momentary pushbutton to power on the system. Upon boot the FET is kept high by the ESP so that it keeps powering itself. The system powers itself off after a delay that is configurable in the settings file.
+
+
+
+
+
+Questions & Clarifications Needed
+
+1. Igniter Circuit Details
+
+You mention "a FET output to fire an igniter (xxx how + current sense how?)"
+Questions:
+What voltage/current ratings for the igniter FET? -> Supply voltage for the BASE unit is 19V DC. This supply will be used to fire the igniter through the FET. Max current would be 2A.
+For IGNITER_SENSE (pin 2): What series resistor value for current sensing?  -> I'll use a known pull-up resistor Rtest from 3.3 V to the ADC sense node, and the load from sense node to ground: 3.3 V → Rtest → ADC node →  Rload → GND. Rtest will be 3.3k ohm
+
+What's the expected igniter resistance range? -> About ~0.5 Ω to ~2 Ω
+Should current sensing use the ESP32's ADC or the AS1256? -> It should use the PORT_IGNITER_SENSE on port 2 of the ASD1115.
+
+
+2. Pin Conflicts
+
+IGNITER_SENSE is defined as pin 2, but LED_BUILTIN is also pin 2. -> IGNITER_SENSE is pin 2 of the AS1256 ADC. LED_BUILTIN is pin 2 of the ESP32.
+Should IGNITER_SENSE use a different pin or the AS1256? -> Pin 2 on the AS1256
+Are the ADS pin definitions correct? -> yes
+
+
+3. Communication Protocol Details
+
+The packet structure mentions "data variable" for output commands but doesn't define the complete struct
+Questions:
+
+What's the complete ESP-NOW packet structure (typedef struct)? -> Propose something
+Should there be acknowledgment/retry logic? -> Yes. 5 retries would be sufficient. If 2 retries are needed, throw a communications warning. If it fails after 5 retries then throw a communications error.
+What's the maximum packet size? -> propose something
+
+
+4. REMOTE I2C Pin Conflict
+
+5. Battery Voltage Sensing
+
+"Propose suitable resistor values" for VOLT_BAT voltage divider
+Questions:
+
+What's the LiPo cell count (1S=4.2V max, 2S=8.4V max, etc.)? ->  The LiPo 1S.
+Should we use standard 10kΩ/10kΩ divider or custom values? -> Use custom values that give a full voltage swing for a 1S Lipo read by an ESP32 ADC pin.
+
+
+
+7. State Machine Transitions
+
+Several states mention "Safe switch long press button short press" which seems contradictory
+Question: Should this be "Safe switch short press" or "Arm switch short press"? -> When a Safe switch long press command is received, switch to state IDLE
+
+
+8. End Test Detection Algorithm
+
+"They might not completely fall back to zero, so an intelligent algorithm is needed"
+Question: What threshold percentage of peak values should trigger end detection? (e.g., <10% of max for END_TEST_DELAY seconds?) -> Within 5% of the average value at the start of the test sounds about right. Make sure to continue logging for END_TEST_DELAY after the end of the test has been detected, to make sure we don't miss any test values.
+
+
+9. RSSI Thresholds
+
+What RSSI values should trigger COMMS_WARNING and COMMS_ERROR? Suggested defaults: -70 dBm for warning, -85 dBm for error? -> OK, but make this #define s in the code so I can change them later in one spot.
+
+10. RGB LED Usage
+Both units have RGB_LED (pin 47) defined but no usage specified. Question: Should this provide visual status indication? What color scheme? -> Yes please. Green = safe state, orange = armed state, red blinking = while testing, blue = end of test
+
+11. Settings File Format
+
+Should the settings parser support comments (#) and handle missing values gracefully? -> Yes
+Should there be default fallback values if settings.txt is missing/corrupted? -> No
+
+12. Data Types
+
+Should calibration values be float or double? -> float
+Should timestamps be uint32_t milliseconds or uint64_t microseconds? -> microseconds. Use . as a thousands divider. Ensure that this variable can range between 0 and 100 seconds.

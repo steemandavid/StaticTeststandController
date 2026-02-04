@@ -1,37 +1,36 @@
-# ESP-IDF build artifacts
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
 build/
-build_base/
-build_remote/
-sdkconfig
-sdkconfig.old
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Automaker
+# Project
 .automaker/
-
-# Dependencies
-managed_components/
-
-# Debug
-*.log
-
-# Python
-__pycache__/
-*.pyc
-
-# Test results (large JSON files, temporary)
-scripts/test_results/
-test_results/
-
-# Local configuration (hardware ports, local settings)
-hardware_test_config.local.json
+*.tmp
+*.bak
