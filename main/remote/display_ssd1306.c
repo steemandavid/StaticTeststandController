@@ -354,6 +354,13 @@ void display_update_task(void *pvParameters)
         /* Check for display commands with short timeout for periodic refresh */
         if (xQueueReceive(display_cmd_queue, &cmd_pkt,
                           pdMS_TO_TICKS(DISPLAY_REFRESH_MS)) == pdTRUE) {
+            /* State name lookup table */
+            static const char *state_names[] = {
+                "INIT","IDLE","ARMED","START","IGNIT",
+                "RUN","END","HALT","CHKIG","CHKBR",
+                "CALLC","CALPR","WELCM"
+            };
+
             switch (cmd_pkt.command) {
                 case CMD_DISPLAY_CLEAR:
                     display_clear();
@@ -366,17 +373,16 @@ void display_update_task(void *pvParameters)
                     display_show_sensor_value(cmd_pkt.message, value);
                     break;
                 }
+                default:
+                    /* LED commands or other commands - just update state */
+                    break;
             }
 
-            /* Update state from packet */
-            const char *state_names[] = {
-                "INIT","IDLE","ARMED","START","IGNIT",
-                "RUN","END","HALT","CHKIG","CHKBR",
-                "CALLC","CALPR","WELCM"
-            };
+            /* Update state from any packet that has valid base_state */
             if (cmd_pkt.base_state < 13) {
                 strncpy(s_params.base_state, state_names[cmd_pkt.base_state],
                         sizeof(s_params.base_state) - 1);
+                s_params.base_state[sizeof(s_params.base_state) - 1] = '\0';
             }
         }
 

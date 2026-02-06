@@ -189,6 +189,9 @@ void espnow_rx_task(void *pvParameters)
                    packet.command <= CMD_BUTTON_LED_OFF) {
             uint8_t cmd = packet.command;
             xQueueSend(input_event_queue, &cmd, pdMS_TO_TICKS(50));
+
+            /* Also forward state info to display queue for status bar update */
+            xQueueSend(display_cmd_queue, &packet, pdMS_TO_TICKS(50));
         } else if (packet.command == CMD_PING) {
             espnow_packet_t response = {0};
             response.command = CMD_PING_RESPONSE;

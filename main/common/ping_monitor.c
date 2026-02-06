@@ -10,6 +10,7 @@
 #include "ping_monitor.h"
 #include "esp_now_protocol.h"
 #include "shared_queues.h"
+#include "safety.h"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -65,6 +66,11 @@ void ping_monitor_task(void *pvParameters)
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(PING_INTERVAL_MS));
+
+#ifdef BUILD_TARGET_REMOTE
+        /* Feed watchdog on REMOTE (BASE has state_machine_task doing this) */
+        safety_watchdog_feed();
+#endif
 
         /* Send ping */
         espnow_packet_t ping_pkt = {0};

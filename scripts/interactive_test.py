@@ -10,6 +10,8 @@ Usage:
     python3 scripts/interactive_test.py
     python3 scripts/interactive_test.py --category automated
     python3 scripts/interactive_test.py --verbose
+
+Log files are written to: scripts/test_results/
 """
 
 import argparse
@@ -17,7 +19,9 @@ import json
 import os
 import sys
 import time
+import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 try:
@@ -25,6 +29,56 @@ try:
 except ImportError:
     print("Error: pyserial not installed. Run: pip install pyserial")
     sys.exit(1)
+
+
+# ── Logging Setup ─────────────────────────────────────────────────────────────
+
+# Global file logger - will be initialized in main()
+_file_logger: Optional[logging.Logger] = None
+_log_file_path: Optional[str] = None
+
+
+def setup_file_logging(log_dir: str = "scripts/test_results") -> str:
+    """Setup file logging and return the log file path."""
+    global _file_logger, _log_file_path
+
+    # Create log directory
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Create timestamped log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _log_file_path = os.path.join(log_dir, f"test_run_{timestamp}.log")
+
+    # Setup logger
+    _file_logger = logging.getLogger("interactive_test")
+    _file_logger.setLevel(logging.DEBUG)
+
+    # File handler
+    fh = logging.FileHandler(_log_file_path)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    _file_logger.addHandler(fh)
+
+    _file_logger.info(f"Test run started at {datetime.now().isoformat()}")
+    return _log_file_path
+
+
+def log(level: str, message: str, response: Optional[dict] = None):
+    """Log message to file with optional JSON response."""
+    if _file_logger:
+        log_fn = getattr(_file_logger, level.lower(), _file_logger.info)
+        log_fn(message)
+        if response:
+            _file_logger.debug(f"  Response: {json.dumps(response)}")
+
+
+def log_test_result(name: str, target: str, passed: bool, skipped: bool, detail: str, response: Optional[dict] = None):
+    """Log a test result to file."""
+    if _file_logger:
+        status = "SKIP" if skipped else ("PASS" if passed else "FAIL")
+        _file_logger.info(f"[{status}] {target}: {name} - {detail}")
+        if response:
+            _file_logger.debug(f"  Response: {json.dumps(response)}")
 
 
 # ── ANSI Color Constants ──────────────────────────────────────────────────────
@@ -208,21 +262,26 @@ class InteractiveTestSuite:
     def connect_devices(self) -> bool:
         """Connect to both devices. Returns True if at least one connected."""
         print(f"\n{c(Colors.BOLD, 'Connecting to devices...')}")
+        log("info", "Connecting to devices...")
 
         # Connect BASE
         self.base = SerialConnection(self.base_port)
         if self.base.open():
             print(f"  BASE   ({self.base_port}): {c(Colors.GREEN, 'Connected')} {c(Colors.GREEN, chr(0x2713))}")
+            log("info", f"BASE ({self.base_port}): Connected")
         else:
             print(f"  BASE   ({self.base_port}): {c(Colors.RED, 'FAILED')}")
+            log("error", f"BASE ({self.base_port}): Connection FAILED")
             self.base = None
 
         # Connect REMOTE
         self.remote = SerialConnection(self.remote_port)
         if self.remote.open():
             print(f"  REMOTE ({self.remote_port}): {c(Colors.GREEN, 'Connected')} {c(Colors.GREEN, chr(0x2713))}")
+            log("info", f"REMOTE ({self.remote_port}): Connected")
         else:
             print(f"  REMOTE ({self.remote_port}): {c(Colors.RED, 'FAILED')}")
+            log("error", f"REMOTE ({self.remote_port}): Connection FAILED")
             self.remote = None
 
         return self.base is not None or self.remote is not None
@@ -320,14 +379,20 @@ class InteractiveTestSuite:
         result = TestResult(name=name, target=target)
         start = time.monotonic()
 
+        log("info", f"Starting test: {name} ({target})")
+
         try:
             test_fn(result)
         except Exception as e:
             result.passed = False
             result.detail = f"Exception: {e}"
+            log("error", f"Exception in test {name}: {e}")
 
         result.duration_ms = int((time.monotonic() - start) * 1000)
         self.results.append(result)
+
+        # Log result to file
+        log_test_result(name, target, result.passed, result.skipped, result.detail, result.response)
 
         # Update category stats
         if category not in self.category_stats:
@@ -555,15 +620,30 @@ class InteractiveTestSuite:
             self.print_test_result(result)
 
     def _test_buzzer_unit(self, result: TestResult, conn: SerialConnection, pin: int):
-        print(f"         {c(Colors.INFO, chr(0x2192))} Activating buzzer (GPIO {pin})...")
-        print(f"         {c(Colors.DIM, 'Buzzer should sound for 0.5 seconds')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Stopping any active buzzer pattern...")
 
-        # Active low: write 0 to turn on, 1 to turn off
-        conn.send_command(f"GPIO WRITE {pin} 0")
-        time.sleep(0.5)
-        conn.send_command(f"GPIO WRITE {pin} 1")
+        # First stop any active buzzer pattern
+        resp = conn.send_command("BUZZER OFF")
+        log("debug", "Sent BUZZER OFF", resp)
+        time.sleep(0.3)
 
-        response = self.ask_user("Did you hear the buzzer?")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Playing short beep...")
+        print(f"         {c(Colors.DIM, 'Buzzer should sound for ~100ms')}")
+
+        # Play a short beep using the buzzer task
+        resp = conn.send_command("BUZZER SHORT")
+        result.response = resp
+        log("debug", "Sent BUZZER SHORT", resp)
+
+        if resp is None:
+            result.detail = "No response to BUZZER command - firmware may need update"
+            log("warning", "BUZZER command not recognized - falling back to GPIO")
+            # Fallback to GPIO if BUZZER command not supported
+            conn.send_command(f"GPIO WRITE {pin} 0")
+            time.sleep(0.5)
+            conn.send_command(f"GPIO WRITE {pin} 1")
+
+        response = self.ask_user("Did you hear the buzzer beep?")
         if response == 'y':
             result.passed = True
             result.detail = "User confirmed buzzer sound"
@@ -573,20 +653,24 @@ class InteractiveTestSuite:
         else:
             result.detail = "User did not hear buzzer"
 
+        # Ensure buzzer is off after test
+        conn.send_command("BUZZER OFF")
+
     # ── LED Tests ─────────────────────────────────────────────────────────────
 
     def test_leds(self):
         """Run LED tests (visual confirmation required)."""
         tests = []
 
+        # RGB/Neopixel LED tests (GPIO 47 on both units)
         if self.base:
-            tests.append(("BASE Built-in LED", "BASE", lambda r: self._test_led(r, self.base, 2, "built-in LED")))
+            tests.append(("BASE RGB LED (Neopixel)", "BASE", lambda r: self._test_neopixel_led(r, self.base)))
 
         if self.remote:
-            tests.append(("REMOTE Built-in LED", "REMOTE", lambda r: self._test_led(r, self.remote, 32, "built-in LED")))
-            tests.append(("REMOTE Button LED", "REMOTE", lambda r: self._test_led(r, self.remote, 17, "button LED")))
+            tests.append(("REMOTE RGB LED (Neopixel)", "REMOTE", lambda r: self._test_neopixel_led(r, self.remote)))
+            tests.append(("REMOTE Button LED", "REMOTE", lambda r: self._test_gpio_led(r, self.remote, 17, "button LED")))
 
-        # RGB LED test (reads current state)
+        # RGB LED state color test
         if self.base:
             tests.append(("RGB LED State Color", "BASE", lambda r: self._test_rgb_led(r)))
 
@@ -603,10 +687,65 @@ class InteractiveTestSuite:
             result = self.run_test(name, target, test_fn, "LEDs")
             self.print_test_result(result)
 
-    def _test_led(self, result: TestResult, conn: SerialConnection, pin: int, description: str):
+    def _test_neopixel_led(self, result: TestResult, conn: SerialConnection):
+        """Test the Neopixel RGB LED on GPIO 47."""
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to RED...")
+
+        resp = conn.send_command("LED SET 255 0 0 solid")
+        result.response = resp
+        log("debug", "Sent LED SET 255 0 0 solid", resp)
+
+        if resp is None or resp.get("status") == "error":
+            result.detail = "LED command not supported - firmware may need update"
+            log("warning", "LED command failed or not recognized")
+            return
+
+        response = self.ask_user("Is the LED glowing RED?")
+        if response != 'y':
+            if response == 's':
+                result.skipped = True
+                result.detail = "Skipped by user"
+                conn.send_command("LED OFF")
+                return
+            result.detail = "LED not showing RED"
+            conn.send_command("LED OFF")
+            return
+
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to GREEN...")
+        conn.send_command("LED SET 0 255 0 solid")
+
+        response = self.ask_user("Is the LED glowing GREEN?")
+        if response != 'y':
+            if response == 's':
+                result.skipped = True
+                result.detail = "Skipped by user"
+            else:
+                result.detail = "LED not showing GREEN"
+            conn.send_command("LED OFF")
+            return
+
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to BLUE...")
+        conn.send_command("LED SET 0 0 255 solid")
+
+        response = self.ask_user("Is the LED glowing BLUE?")
+        conn.send_command("LED OFF")
+
+        if response == 'y':
+            result.passed = True
+            result.detail = "User confirmed RGB LED working (all colors)"
+        elif response == 's':
+            result.skipped = True
+            result.detail = "Skipped by user"
+        else:
+            result.detail = "LED not showing BLUE"
+
+    def _test_gpio_led(self, result: TestResult, conn: SerialConnection, pin: int, description: str):
+        """Test a simple GPIO LED."""
         print(f"         {c(Colors.INFO, chr(0x2192))} Turning ON {description} (GPIO {pin})...")
 
-        conn.send_command(f"GPIO WRITE {pin} 1")
+        resp = conn.send_command(f"GPIO WRITE {pin} 1")
+        log("debug", f"GPIO WRITE {pin} 1", resp)
+
         response = self.ask_user(f"Is the {description} ON?")
         conn.send_command(f"GPIO WRITE {pin} 0")
 
@@ -755,7 +894,7 @@ class InteractiveTestSuite:
     def _test_button_long(self, result: TestResult):
         print(f"         {c(Colors.INFO, chr(0x2192))} Press and HOLD the button for 3 seconds")
 
-        if not self.wait_for_input("Hold the button now...", timeout=15.0):
+        if not self.wait_for_input("Hold the button now...", timeout=30.0):
             result.skipped = True
             result.detail = "Timeout waiting for long press"
             return
@@ -784,7 +923,7 @@ class InteractiveTestSuite:
         print(f"         {c(Colors.INFO, chr(0x2192))} Current state: {c(Colors.BOLD, before_state)}")
         print(f"         {c(Colors.DIM, 'Toggle the ARM/SAFE switch')}")
 
-        if not self.wait_for_input("Toggle the switch now...", timeout=15.0):
+        if not self.wait_for_input("Toggle the switch now...", timeout=30.0):
             result.skipped = True
             result.detail = "Timeout waiting for switch toggle"
             return
@@ -1120,6 +1259,14 @@ class InteractiveTestSuite:
 
         print()
 
+        # Log summary to file
+        log("info", "=" * 60)
+        log("info", "TEST SUMMARY")
+        log("info", f"Total: {total_tests}, Passed: {total_passed}, Failed: {total_failed}, Skipped: {total_skipped}")
+        for category, stats in sorted(self.category_stats.items()):
+            log("info", f"  {category}: {stats['passed']}/{stats['total']} passed")
+        log("info", "=" * 60)
+
         return total_failed
 
 
@@ -1178,12 +1325,18 @@ Examples:
                         help="Disable ANSI colors")
     parser.add_argument("--config", default="hardware_test_config.json",
                         help="Path to config file (default: hardware_test_config.json)")
+    parser.add_argument("--log-dir", default="scripts/test_results",
+                        help="Directory for log files (default: scripts/test_results)")
 
     args = parser.parse_args()
 
     # Disable colors if requested
     if args.no_color:
         _use_colors = False
+
+    # Setup file logging
+    log_path = setup_file_logging(args.log_dir)
+    print(f"\n{c(Colors.DIM, f'Logging to: {log_path}')}")
 
     # Load config
     config = load_config(args.config)

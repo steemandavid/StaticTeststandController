@@ -10,6 +10,8 @@
 #include "test_protocol.h"
 #include "shared_queues.h"
 #include "esp_now_protocol.h"
+#include "buzzer.h"
+#include "rgb_led.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -198,6 +200,78 @@ static void handle_espnow_status(void)
     send_ok("ESPNOW STATUS", buf);
 }
 
+static void handle_buzzer(const char *args)
+{
+    if (strcmp(args, "OFF") == 0) {
+        buzzer_stop();
+        send_ok("BUZZER", "{\"pattern\":\"off\"}");
+    } else if (strcmp(args, "SHORT") == 0) {
+        buzzer_play(BUZZER_PATTERN_SHORT_BEEP);
+        send_ok("BUZZER", "{\"pattern\":\"short\"}");
+    } else if (strcmp(args, "LONG") == 0) {
+        buzzer_play(BUZZER_PATTERN_LONG_BEEP);
+        send_ok("BUZZER", "{\"pattern\":\"long\"}");
+    } else if (strcmp(args, "DOUBLE") == 0) {
+        buzzer_play(BUZZER_PATTERN_DOUBLE_BEEP);
+        send_ok("BUZZER", "{\"pattern\":\"double\"}");
+    } else if (strcmp(args, "ALARM") == 0) {
+        buzzer_play(BUZZER_PATTERN_ALARM);
+        send_ok("BUZZER", "{\"pattern\":\"alarm\"}");
+    } else {
+        send_error("BUZZER", "Usage: TEST BUZZER OFF|SHORT|LONG|DOUBLE|ALARM");
+    }
+}
+
+static void handle_led(const char *args)
+{
+    if (strcmp(args, "OFF") == 0) {
+        rgb_led_set(0, 0, 0, LED_PATTERN_OFF);
+        send_ok("LED", "{\"r\":0,\"g\":0,\"b\":0,\"pattern\":\"off\"}");
+        return;
+    }
+
+    /* Parse: LED SET <r> <g> <b> [pattern] */
+    if (strncmp(args, "SET ", 4) != 0) {
+        send_error("LED", "Usage: TEST LED OFF or TEST LED SET <r> <g> <b> [pattern]");
+        return;
+    }
+
+    int r = 0, g = 0, b = 0;
+    char pattern_str[16] = "solid";
+    int parsed = sscanf(args + 4, "%d %d %d %15s", &r, &g, &b, pattern_str);
+    if (parsed < 3) {
+        send_error("LED", "Usage: TEST LED SET <r> <g> <b> [pattern]");
+        return;
+    }
+
+    /* Clamp values */
+    if (r < 0) r = 0; if (r > 255) r = 255;
+    if (g < 0) g = 0; if (g > 255) g = 255;
+    if (b < 0) b = 0; if (b > 255) b = 255;
+
+    led_pattern_t pattern = LED_PATTERN_SOLID;
+    if (strcmp(pattern_str, "off") == 0) {
+        pattern = LED_PATTERN_OFF;
+    } else if (strcmp(pattern_str, "solid") == 0) {
+        pattern = LED_PATTERN_SOLID;
+    } else if (strcmp(pattern_str, "breathing") == 0) {
+        pattern = LED_PATTERN_BREATHING;
+    } else if (strcmp(pattern_str, "blink") == 0) {
+        pattern = LED_PATTERN_BLINK_2HZ;
+    } else if (strcmp(pattern_str, "pulse") == 0) {
+        pattern = LED_PATTERN_PULSE_HALF_HZ;
+    } else if (strcmp(pattern_str, "rapid") == 0) {
+        pattern = LED_PATTERN_RAPID_BLINK_5HZ;
+    }
+
+    rgb_led_set((uint8_t)r, (uint8_t)g, (uint8_t)b, pattern);
+
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"r\":%d,\"g\":%d,\"b\":%d,\"pattern\":\"%s\"}",
+             r, g, b, pattern_str);
+    send_ok("LED", buf);
+}
+
 static void handle_reset(void)
 {
     send_ok("RESET", "{\"resetting\":true}");
@@ -238,6 +312,10 @@ static void dispatch_command(char *cmd_line)
         handle_tasks();
     } else if (strcmp(cmd_line, "ESPNOW STATUS") == 0) {
         handle_espnow_status();
+    } else if (strncmp(cmd_line, "BUZZER ", 7) == 0) {
+        handle_buzzer(cmd_line + 7);
+    } else if (strncmp(cmd_line, "LED ", 4) == 0) {
+        handle_led(cmd_line + 4);
     } else if (strcmp(cmd_line, "RESET") == 0) {
         handle_reset();
     } else {
