@@ -1,0 +1,27 @@
+{
+    "targets": {
+        "BASE": {
+            "serial_port": "/dev/ttyACM1",
+            "baud_rate": 115200,
+            "description": "Base unit - data acquisition, logging, igniter control"
+        },
+        "REMOTE": {
+            "serial_port": "/dev/ttyACM0",
+            "baud_rate": 115200,
+            "description": "Remote unit - wireless controller with OLED display"
+        }
+    },
+    "flash": {
+        "baud_rate": 921600,
+        "flash_mode": "qio",
+        "flash_freq": "80m",
+        "flash_size": "16MB",
+        "chip": "esp32s3"
+    },
+    "test_runner": {
+        "timeout_s": 30,
+        "boot_wait_s": 5,
+        "retry_count": 3,
+        "retry_delay_s": 2
+    }
+}

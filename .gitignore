@@ -1,0 +1,30 @@
+# ESP-IDF build artifacts
+build/
+build_base/
+build_remote/
+sdkconfig
+sdkconfig.old
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Automaker
+.automaker/
+
+# Dependencies
+managed_components/
+
+# Debug
+*.log
+
+# Python
+__pycache__/
+*.pyc
