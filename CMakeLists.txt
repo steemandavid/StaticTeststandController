@@ -2,6 +2,16 @@
 # Dual-unit embedded system for rocket motor static testing
 cmake_minimum_required(VERSION 3.16)
 
+# Increment build number before each build
+execute_process(
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/increment_version.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    RESULT_VARIABLE VERSION_RESULT
+)
+if(NOT VERSION_RESULT EQUAL 0)
+    message(WARNING "Failed to increment version number")
+endif()
+
 # Build target: set to "BASE" or "REMOTE" before building
 # Usage: BUILD_TARGET=BASE idf.py build
 #    or: BUILD_TARGET=REMOTE idf.py build

@@ -1,12 +1,12 @@
 {
     "targets": {
         "BASE": {
-            "serial_port": "/dev/ttyACM1",
+            "serial_port": "/dev/ttyACM0",
             "baud_rate": 115200,
             "description": "Base unit - data acquisition, logging, igniter control"
         },
         "REMOTE": {
-            "serial_port": "/dev/ttyACM0",
+            "serial_port": "/dev/ttyACM1",
             "baud_rate": 115200,
             "description": "Remote unit - wireless controller with OLED display"
         }

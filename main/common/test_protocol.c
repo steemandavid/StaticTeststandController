@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "config.h"
+#include "version.h"
 #include "test_protocol.h"
 #include "shared_queues.h"
 #include "esp_now_protocol.h"
@@ -66,20 +67,20 @@ static void handle_info(void)
 {
     int64_t uptime_us = esp_timer_get_time();
     int64_t uptime_s = uptime_us / 1000000;
-    char buf[192];
+    char buf[256];
 
 #ifdef BUILD_TARGET_BASE
     snprintf(buf, sizeof(buf),
              "{\"target\":\"BASE\",\"project\":\"StaticTeststandController\","
-             "\"idf_version\":\"%s\",\"uptime_s\":%lld,"
+             "\"version\":\"%s\",\"idf_version\":\"%s\",\"uptime_s\":%lld,"
              "\"chip\":\"ESP32-S3\"}",
-             esp_get_idf_version(), (long long)uptime_s);
+             VERSION_STRING, esp_get_idf_version(), (long long)uptime_s);
 #else
     snprintf(buf, sizeof(buf),
              "{\"target\":\"REMOTE\",\"project\":\"StaticTeststandController\","
-             "\"idf_version\":\"%s\",\"uptime_s\":%lld,"
+             "\"version\":\"%s\",\"idf_version\":\"%s\",\"uptime_s\":%lld,"
              "\"chip\":\"ESP32-S3\"}",
-             esp_get_idf_version(), (long long)uptime_s);
+             VERSION_STRING, esp_get_idf_version(), (long long)uptime_s);
 #endif
     send_ok("INFO", buf);
 }

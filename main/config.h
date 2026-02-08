@@ -44,11 +44,11 @@
 
 /* Igniter */
 #define PIN_IGNITION        41
-#define PIN_LOW_SIDE_POWER  40
+#define PIN_LOW_SIDE_POWER  4
 
 /* Output */
 #define PIN_BUZZER          42
-#define PIN_RGB_LED         47
+#define PIN_RGB_LED         48
 #define PIN_LED_BUILTIN     2
 
 #endif /* BUILD_TARGET_BASE */
@@ -69,11 +69,11 @@
 #define PIN_SWITCH_SAFE     5
 
 /* Battery */
-#define PIN_VOLT_BAT        1
+#define PIN_VOLT_BAT        6
 
 /* Output */
 #define PIN_BUZZER          42
-#define PIN_RGB_LED         47
+#define PIN_RGB_LED         48
 #define PIN_LED_BUILTIN     32
 
 #endif /* BUILD_TARGET_REMOTE */

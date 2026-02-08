@@ -15,8 +15,8 @@
 | AS1256 ADC (SPI) | MOSI:35, SCLK:36, MISO:37, CS:39, RST:38, DRDY:40 | 24-bit ADC |
 | SD Card (SPI) | MOSI:11, CLK:12, MISO:13, CS:10 | FAT32 formatted |
 | DS1307 RTC (I2C) | SDA:8, SCL:9 | DS:3 | CR2032 backup battery |
-| Igniter FET | GPIO 41 (control), GPIO 40 (power) | 19V, 2A max |
-| WS2812 RGB LED | GPIO 47 | Status indicator |
+| Igniter FET | GPIO 41 (control), GPIO 4 (power) | 19V, 2A max |
+| WS2812 RGB LED | GPIO 48 | Status indicator |
 | Buzzer | GPIO 42 | Audio feedback |
 
 ### REMOTE Unit
@@ -26,8 +26,8 @@
 | SSD1306 OLED (I2C) | SDA:8, SCL:9 | 128x64 pixels |
 | Ignition Button | GPIO 16 (input), GPIO 17 (LED) | Illuminated pushbutton |
 | Arm/Safe Switch | GPIO 4 (armed), GPIO 5 (safe) | Toggle, active low |
-| Battery Monitor | GPIO 1 | ADC, voltage divider |
-| WS2812 RGB LED | GPIO 47 | Status indicator |
+| Battery Monitor | GPIO 6 | ADC, voltage divider |
+| WS2812 RGB LED | GPIO 48 | Status indicator |
 | Buzzer | GPIO 42 | Audio feedback |
 
 ## Building Firmware
