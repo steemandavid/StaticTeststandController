@@ -343,6 +343,11 @@ esp_err_t display_show_sensor_value(const char *label, float value)
     return ESP_OK;
 }
 
+const char *display_get_base_state(void)
+{
+    return s_params.base_state;
+}
+
 void display_update_task(void *pvParameters)
 {
     espnow_packet_t cmd_pkt;

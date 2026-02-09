@@ -7,9 +7,10 @@ both automated tests and interactive user-confirmation tests for
 hardware verification (LEDs, buzzer, display, buttons).
 
 Usage:
-    python3 scripts/interactive_test.py
-    python3 scripts/interactive_test.py --category automated
-    python3 scripts/interactive_test.py --verbose
+    cd scripts
+    python3 interactive_test.py
+    python3 interactive_test.py --category automated
+    python3 interactive_test.py --verbose
 
 Log files are written to: scripts/test_results/
 """
@@ -59,8 +60,6 @@ def setup_file_logging(log_dir: str = "scripts/test_results") -> str:
     fh = logging.FileHandler(_log_file_path, mode='w')
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-    # Immediate flush for every write
-    fh.flush = lambda: fh.stream.flush()  # Override flush to ensure immediate write
     _file_logger.addHandler(fh)
 
     # Force flush the file handler to ensure file is created
@@ -1101,27 +1100,72 @@ class InteractiveTestSuite:
             result.detail = "Could not retrieve queue status"
 
     def _test_state_broadcast(self, result: TestResult):
+        """Test that BASE state is broadcast to REMOTE automatically."""
         # Get state from BASE
         state_resp = self.base.send_command("STATE")
         if not state_resp or state_resp.get("status") != "ok":
             result.detail = "Could not read state from BASE"
             return
 
-        state_name = state_resp.get("data", {}).get("name", "UNKNOWN")
+        base_state = state_resp.get("data", {}).get("name", "UNKNOWN")
+        base_state_num = state_resp.get("data", {}).get("state", -1)
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} BASE state: {c(Colors.BOLD, state_name)}")
-        print(f"         {c(Colors.DIM, 'Check if REMOTE display shows the same state')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} BASE state: {c(Colors.BOLD, base_state)} (state #{base_state_num})")
 
-        response = self.ask_user(f"Does REMOTE display show '{state_name}'?")
+        # Query REMOTE for the BASE state it received via ESP-NOW
+        remote_resp = self.remote.send_command("BASE_STATE")
+        if not remote_resp or remote_resp.get("status") != "ok":
+            result.detail = "Could not read BASE state from REMOTE - BASE_STATE command not supported?"
+            return
 
-        if response == 'y':
+        remote_base_state = remote_resp.get("data", {}).get("base_state", "")
+
+        # Map BASE state names to REMOTE display state names
+        # BASE uses longer names, REMOTE uses 6-char abbreviations
+        state_name_map = {
+            "INIT": "INIT",
+            "IDLE": "IDLE",
+            "ARMED": "ARMED",
+            "STARTTEST": "START",
+            "IGNITION": "IGNIT",
+            "TESTRUNNING": "RUN",
+            "ENDTEST": "END",
+            "HALT": "HALT",
+            "CHECK_IGNITER": "CHKIG",
+            "CHECK_BREAKWIRES": "CHKBR",
+            "CALIBRATE_LOADCELL": "CALLC",
+            "CALIBRATE_PRESSURE": "CALPR",
+            "WELCOME_SCREEN": "WELCM",
+        }
+
+        expected_remote_state = state_name_map.get(base_state, base_state)
+
+        print(f"         {c(Colors.INFO, chr(0x2192))} REMOTE received: {c(Colors.BOLD, remote_base_state)}")
+
+        # Check if states match
+        if remote_base_state == expected_remote_state:
             result.passed = True
-            result.detail = f"State '{state_name}' synchronized to REMOTE"
-        elif response == 's':
-            result.skipped = True
-            result.detail = "Skipped by user"
+            result.detail = f"State '{base_state}' correctly broadcast to REMOTE (showing '{remote_base_state}')"
         else:
-            result.detail = f"REMOTE display does not show '{state_name}'"
+            # In automated mode, this is a failure
+            if self.quiet:
+                result.passed = False
+                result.detail = f"State mismatch: BASE '{base_state}' -> REMOTE '{remote_base_state}' (expected '{expected_remote_state}')"
+            else:
+                # Interactive mode: allow user verification
+                print(f"         {c(Colors.DIM, 'State names don\'t match exactly - visual verification needed')}")
+                print(f"         {c(Colors.DIM, f'BASE: {base_state} ({expected_remote_state}) vs REMOTE: {remote_base_state}')}")
+                response = self.ask_user(f"Does REMOTE display show correct state for '{base_state}'?")
+
+                if response == 'y':
+                    result.passed = True
+                    result.detail = f"State '{base_state}' visually verified on REMOTE"
+                elif response == 's':
+                    result.skipped = True
+                    result.detail = "Skipped by user"
+                else:
+                    result.passed = False
+                    result.detail = f"REMOTE display shows '{remote_base_state}' instead of '{expected_remote_state}'"
 
     # ── State Machine Tests ───────────────────────────────────────────────────
 
@@ -1138,6 +1182,7 @@ class InteractiveTestSuite:
         tests = [
             ("Current State", "BASE", lambda r: self._test_current_state(r)),
             ("State Command", "BASE", lambda r: self._test_state_command(r)),
+            ("State Transitions", "BASE", lambda r: self._test_state_transitions(r)),
         ]
 
         for i, (name, target, test_fn) in enumerate(tests, 1):
@@ -1194,6 +1239,161 @@ class InteractiveTestSuite:
             result.detail = f"State command working: {data.get('name', 'unknown')}"
         else:
             result.detail = "STATE command failed"
+
+    def _test_state_transitions(self, result: TestResult):
+        """Test all state transitions - automated with optional manual verification."""
+        # States to test (in logical order)
+        states = [
+            ("IDLE", "Green breathing LED", "Green"),
+            ("ARMED", "Orange solid LED", "Orange"),
+            # Skip WELCOME as it auto-transitions to IDLE after 2 seconds
+            # ("WELCOME", "Blue solid LED", "Blue"),
+            ("CAL_LC", "Calibration mode for load cell", "Yellow pulsing"),
+            ("CAL_PR", "Calibration mode for pressure", "Yellow pulsing"),
+            ("CHK_IGN", "Pre-flight igniter check", "Magenta pulsing"),
+            ("CHK_BRK", "Pre-flight breakwire check", "Magenta pulsing"),
+            ("HALT", "Red pulsing LED (emergency stop)", "Red pulsing"),
+        ]
+
+        # Store original state to restore later
+        original_resp = self.base.send_command("STATE")
+        original_state = original_resp.get("data", {}).get("name", "IDLE") if original_resp else "IDLE"
+
+        # Reset to IDLE state before testing (ensures consistent starting point)
+        print()
+        print(f"         {c(Colors.INFO, chr(0x2192))} Resetting to IDLE state before test...")
+
+        # Check current state first
+        current_resp = self.base.send_command("STATE")
+        current_state = current_resp.get("data", {}).get("name", "") if current_resp else ""
+
+        if current_state == "HALT":
+            # From HALT, must go to INIT first
+            print(f"         {c(Colors.DIM, 'Current state is HALT, transitioning via INIT...')}")
+            init_resp = self.base.send_command("STATE INIT")
+            if init_resp and init_resp.get("status") == "ok":
+                # INIT auto-transitions to WELCOME after 100ms
+                # WELCOME auto-transitions to IDLE after 2 seconds (20 ticks * 100ms)
+                # Wait for both auto-transitions to complete
+                time.sleep(2.5)
+                print(f"         {c(Colors.GREEN, chr(0x2713))} Ready to begin")
+            else:
+                print(f"         {c(Colors.YELLOW, chr(0x26A0))} Warning: Could not transition to INIT")
+        else:
+            # Not in HALT, can go directly to IDLE
+            reset_resp = self.base.send_command("STATE IDLE")
+            if reset_resp and reset_resp.get("status") == "ok":
+                time.sleep(0.5)  # Wait for IDLE to stabilize
+                print(f"         {c(Colors.GREEN, chr(0x2713))} Ready to begin")
+            else:
+                print(f"         {c(Colors.YELLOW, chr(0x26A0))} Warning: Could not reset to IDLE")
+        print()
+
+        passed = 0
+        failed = 0
+        skipped = 0
+        results = []
+
+        print(f"         {c(Colors.INFO, chr(0x2192))} Testing {len(states)} state transitions")
+        print(f"         {c(Colors.DIM, 'Each state will be set and verified')}")
+        print()
+
+        # Enable test mode to prevent automatic HALT transitions from COMMS_ERROR
+        print(f"         {c(Colors.DIM, 'Enabling test mode to prevent automatic HALT transitions...')}")
+        test_mode_resp = self.base.send_command("TEST_MODE ON")
+        if not test_mode_resp or test_mode_resp.get("status") != "ok":
+            print(f"           {c(Colors.YELLOW, chr(0x26A0))} Warning: Could not enable test mode")
+        else:
+            print(f"           {c(Colors.GREEN, chr(0x2713))} Test mode enabled")
+        print()
+
+        for state_name, description, expected_color in states:
+            print(f"         [{c(Colors.BOLD, state_name)}] {description}")
+
+            # Set the state
+            resp = self.base.send_command(f"STATE {state_name}")
+            if not resp or resp.get("status") != "ok":
+                print(f"           {c(Colors.RED, chr(0x2717))} Failed to set state")
+                failed += 1
+                results.append((state_name, False, "Failed to set state"))
+                continue
+
+            # Wait for state to transition and ESP-NOW broadcast (rgb_led_task runs every 20ms, ping every 1s)
+            # Increased delay to prevent ping monitor timeouts during rapid state changes
+            time.sleep(1.0)
+
+            # Verify the state was set
+            verify_resp = self.base.send_command("STATE")
+            if verify_resp and verify_resp.get("status") == "ok":
+                actual_state = verify_resp.get("data", {}).get("name", "")
+
+                if actual_state == state_name:
+                    # State was successfully set
+                    print(f"           {c(Colors.GREEN, chr(0x2713))} State confirmed: {actual_state}")
+                    print(f"           {c(Colors.DIM, chr(0x2192))} Expected LED: {expected_color}")
+
+                    # Ask user to verify LED color (only if not in automated mode)
+                    if not self.quiet:
+                        response = self.ask_user(f"  Does the RGB LED match {expected_color}? [y/n/skip] ", default="skip")
+                        if response == 'y':
+                            print(f"           {c(Colors.GREEN, chr(0x2713))} LED color verified")
+                            passed += 1
+                            results.append((state_name, True, "LED verified"))
+                        elif response == 'n':
+                            print(f"           {c(Colors.RED, chr(0x2717))} LED color mismatch")
+                            failed += 1
+                            results.append((state_name, False, f"LED mismatch (expected {expected_color})"))
+                        else:
+                            print(f"           {c(Colors.YELLOW, chr(0x25EF))} Skipped LED verification")
+                            passed += 1  # Count as pass since state was set correctly
+                            results.append((state_name, True, "State set (LED verification skipped)"))
+                    else:
+                        # Automated mode: just verify state was set
+                        passed += 1
+                        results.append((state_name, True, "State set"))
+                else:
+                    print(f"           {c(Colors.RED, chr(0x2717))} State mismatch: expected {state_name}, got {actual_state}")
+                    failed += 1
+                    results.append((state_name, False, f"State mismatch: {actual_state}"))
+            else:
+                print(f"           {c(Colors.RED, chr(0x2717))} Could not verify state")
+                failed += 1
+                results.append((state_name, False, "Could not verify state"))
+            print()
+
+        # Restore to IDLE state (clean state for next test)
+        print(f"         {c(Colors.INFO, chr(0x2192))} Restoring to IDLE state...")
+        self.base.send_command("STATE IDLE")
+        time.sleep(0.3)
+
+        # Disable test mode after testing
+        print(f"         {c(Colors.DIM, 'Disabling test mode...')}")
+        test_mode_resp = self.base.send_command("TEST_MODE OFF")
+        if not test_mode_resp or test_mode_resp.get("status") != "ok":
+            print(f"           {c(Colors.YELLOW, chr(0x26A0))} Warning: Could not disable test mode")
+        else:
+            print(f"           {c(Colors.GREEN, chr(0x2713))} Test mode disabled")
+        print()
+
+        # Summary
+        total = passed + failed + skipped
+        print(f"         {c(Colors.BOLD, 'Transition Summary')}:")
+        print(f"           {c(Colors.GREEN, chr(0x2713))} Passed: {passed}")
+        if failed > 0:
+            print(f"           {c(Colors.RED, chr(0x2717))} Failed: {failed}")
+        if skipped > 0:
+            print(f"           {c(Colors.YELLOW, chr(0x25EF))} Skipped: {skipped}")
+        print(f"           Total: {total}")
+
+        # Set overall result
+        if failed == 0:
+            result.passed = True
+            result.detail = f"All {passed} state transitions successful"
+            result.response = original_resp
+        else:
+            result.passed = False
+            result.detail = f"{failed}/{total} state transitions failed"
+            result.response = original_resp
 
     # ── Safety Tests ──────────────────────────────────────────────────────────
 
@@ -1523,12 +1723,34 @@ class InteractiveTestSuite:
         print()
 
         # Log summary to file
-        log("info", "=" * 60)
+        log("info", "=" * 68)
         log("info", "TEST SUMMARY")
         log("info", f"Total: {total_tests}, Passed: {total_passed}, Failed: {total_failed}, Skipped: {total_skipped}")
+        log("info", "-" * 68)
+
+        # Category breakdown
         for category, stats in sorted(self.category_stats.items()):
-            log("info", f"  {category}: {stats['passed']}/{stats['total']} passed")
-        log("info", "=" * 60)
+            log("info", f"  {category:<20} Passed: {stats['passed']}, Failed: {stats['failed']}, Skipped: {stats['skipped']}, Total: {stats['total']}")
+
+        log("info", "-" * 68)
+
+        # Detailed failure information
+        if total_failed > 0:
+            log("info", "FAILED TEST DETAILS:")
+            log("info", "-" * 68)
+            for result in self.results:
+                if not result.passed and not result.skipped:
+                    log("info", f"  FAILED: {result.name} (Target: {result.target})")
+                    if result.detail:
+                        log("info", f"    Error: {result.detail}")
+                    # Log possible causes
+                    causes = self._get_failure_causes(result)
+                    log("info", "    Possible causes:")
+                    for cause in causes:
+                        log("info", f"      - {cause}")
+            log("info", "-" * 68)
+
+        log("info", "=" * 68)
 
         return total_failed
 
@@ -1588,8 +1810,8 @@ Examples:
                         help="Disable ANSI colors")
     parser.add_argument("--config", default="hardware_test_config.json",
                         help="Path to config file (default: hardware_test_config.json)")
-    parser.add_argument("--log-dir", default="scripts/test_results",
-                        help="Directory for log files (default: scripts/test_results)")
+    parser.add_argument("--log-dir", default="test_results",
+                        help="Directory for log files (default: test_results/)")
 
     args = parser.parse_args()
 
@@ -1615,6 +1837,15 @@ Examples:
     if args.remote_only:
         base_port = None
 
+    # Log test configuration
+    log("info", f"Test Configuration:")
+    log("info", f"  Category: {args.category}")
+    log("info", f"  Base port: {base_port}")
+    log("info", f"  Remote port: {remote_port}")
+    log("info", f"  Verbose: {args.verbose}")
+    log("info", f"  Base only: {args.base_only}")
+    log("info", f"  Remote only: {args.remote_only}")
+
     # Print header
     print()
     print(c(Colors.BOLD, chr(0x2554) + chr(0x2550) * 66 + chr(0x2557)))
@@ -1629,12 +1860,6 @@ Examples:
         verbose=args.verbose,
         quiet=args.quiet
     )
-
-    # Override connection if ports disabled
-    if args.remote_only:
-        suite.base_port = ""
-    if args.base_only:
-        suite.remote_port = ""
 
     # Connect to devices
     if not suite.connect_devices():

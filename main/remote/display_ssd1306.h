@@ -19,4 +19,10 @@ esp_err_t display_add_log_line(const char *line);
 esp_err_t display_show_sensor_value(const char *label, float value);
 void display_update_task(void *pvParameters);
 
+/**
+ * @brief Get the current BASE state displayed on REMOTE.
+ * @return Pointer to internal state name string (valid until next display update)
+ */
+const char *display_get_base_state(void);
+
 #endif /* DISPLAY_SSD1306_H */

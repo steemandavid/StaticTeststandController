@@ -28,6 +28,10 @@
 #include "state_machine.h"
 #endif
 
+#ifdef BUILD_TARGET_REMOTE
+#include "display_ssd1306.h"
+#endif
+
 static const char *TAG = "test_proto";
 
 #define TEST_UART_NUM       UART_NUM_0
@@ -85,9 +89,30 @@ static void handle_info(void)
     send_ok("INFO", buf);
 }
 
-static void handle_state(void)
+static void handle_state(const char *args)
 {
 #ifdef BUILD_TARGET_BASE
+    /* If args provided, try to set state (testing only) */
+    if (args && strlen(args) > 0) {
+        base_state_t new_state = state_machine_from_name(args);
+        if (new_state >= STATE_MAX) {
+            send_error("STATE", "Invalid state name");
+            return;
+        }
+
+        esp_err_t ret = state_machine_force_state(new_state);
+        if (ret == ESP_OK) {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "{\"state\":%d,\"name\":\"%s\",\"set\":true}",
+                     (int)new_state, state_machine_get_name(new_state));
+            send_ok("STATE", buf);
+        } else {
+            send_error("STATE", "Failed to set state");
+        }
+        return;
+    }
+
+    /* No args: read current state */
     base_state_t state = state_machine_get_state();
     const char *name = state_machine_get_name(state);
     char buf[96];
@@ -95,6 +120,37 @@ static void handle_state(void)
     send_ok("STATE", buf);
 #else
     send_error("STATE", "STATE command only available on BASE unit");
+#endif
+}
+
+static void handle_base_state(void)
+{
+#ifdef BUILD_TARGET_REMOTE
+    /* BASE_STATE query returns the current BASE state displayed on REMOTE */
+    const char *base_state = display_get_base_state();
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"base_state\":\"%s\"}", base_state);
+    send_ok("BASE_STATE", buf);
+#else
+    send_error("BASE_STATE", "BASE_STATE command only available on REMOTE unit");
+#endif
+}
+
+static void handle_test_mode(const char *args)
+{
+#ifdef BUILD_TARGET_BASE
+    /* TEST_MODE ON/OFF - enable or disable test mode */
+    if (strcmp(args, "ON") == 0) {
+        state_machine_set_test_mode(true);
+        send_ok("TEST_MODE", "{\"enabled\":true}");
+    } else if (strcmp(args, "OFF") == 0) {
+        state_machine_set_test_mode(false);
+        send_ok("TEST_MODE", "{\"enabled\":false}");
+    } else {
+        send_error("TEST_MODE", "Usage: TEST TEST_MODE ON|OFF");
+    }
+#else
+    send_error("TEST_MODE", "TEST_MODE command only available on BASE unit");
 #endif
 }
 
@@ -331,7 +387,9 @@ static void dispatch_command(char *cmd_line)
     } else if (strcmp(cmd_line, "INFO") == 0) {
         handle_info();
     } else if (strcmp(cmd_line, "STATE") == 0) {
-        handle_state();
+        handle_state(NULL);  /* Read current state */
+    } else if (strncmp(cmd_line, "STATE ", 6) == 0) {
+        handle_state(cmd_line + 6);  /* Set state */
     } else if (strncmp(cmd_line, "GPIO READ ", 10) == 0) {
         handle_gpio_read(cmd_line + 10);
     } else if (strncmp(cmd_line, "GPIO WRITE ", 11) == 0) {
@@ -348,6 +406,10 @@ static void dispatch_command(char *cmd_line)
         handle_buzzer(cmd_line + 7);
     } else if (strncmp(cmd_line, "LED ", 4) == 0) {
         handle_led(cmd_line + 4);
+    } else if (strcmp(cmd_line, "BASE_STATE") == 0) {
+        handle_base_state();
+    } else if (strncmp(cmd_line, "TEST_MODE ", 10) == 0) {
+        handle_test_mode(cmd_line + 10);
     } else if (strcmp(cmd_line, "RESET") == 0) {
         handle_reset();
     } else {

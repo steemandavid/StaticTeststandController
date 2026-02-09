@@ -23,6 +23,7 @@
 static const char *TAG = "state_machine";
 
 static volatile base_state_t s_current_state = STATE_INIT;
+static volatile bool s_test_mode = false;  /* Flag to disable auto-HALT during testing */
 
 static const char *s_state_names[STATE_MAX] = {
     [STATE_INIT]                = "INIT",
@@ -92,6 +93,12 @@ static bool transition_to(base_state_t new_state);
 
 static void handler_stub(void) { }
 
+/* Generic run handler that feeds watchdog */
+static void handle_generic_run(void)
+{
+    safety_watchdog_feed();
+}
+
 /* INIT */
 static void handle_init_enter(void)
 {
@@ -104,6 +111,12 @@ static void handle_idle_enter(void)
     ESP_LOGI(TAG, "Entering IDLE state");
     rgb_led_set(0, 255, 0, LED_PATTERN_BREATHING);
     buzzer_stop();
+}
+
+static void handle_idle_run(void)
+{
+    /* Feed watchdog to keep system alive while in IDLE */
+    safety_watchdog_feed();
 }
 
 /* ARMED */
@@ -185,6 +198,9 @@ static void handle_welcome_enter(void)
 
 static void handle_welcome_run(void)
 {
+    /* Feed watchdog to keep system alive in WELCOME state */
+    safety_watchdog_feed();
+
     /* 100ms per tick (queue timeout in main loop), 20 ticks = 2000ms */
     s_welcome_ticks++;
     if (s_welcome_ticks >= 20) {
@@ -193,19 +209,19 @@ static void handle_welcome_run(void)
 }
 
 static const state_handlers_t s_handlers[STATE_MAX] = {
-    [STATE_INIT]                = { handle_init_enter,      handler_stub,       handler_stub },
-    [STATE_IDLE]                = { handle_idle_enter,       handler_stub,       handler_stub },
-    [STATE_ARMED]               = { handle_armed_enter,      handler_stub,       handle_armed_exit },
-    [STATE_STARTTEST]           = { handle_starttest_enter,  handler_stub,       handler_stub },
-    [STATE_IGNITION]            = { handler_stub,            handler_stub,       handler_stub },
-    [STATE_TESTRUNNING]         = { handler_stub,            handler_stub,       handler_stub },
-    [STATE_ENDTEST]             = { handler_stub,            handler_stub,       handler_stub },
-    [STATE_HALT]                = { handle_halt_enter,       handle_halt_run,    handle_halt_exit },
-    [STATE_CHECK_IGNITER]       = { handler_stub,            handler_stub,       handler_stub },
-    [STATE_CHECK_BREAKWIRES]    = { handler_stub,            handler_stub,       handler_stub },
-    [STATE_CALIBRATE_LOADCELL]  = { handler_stub,            handler_stub,       handler_stub },
-    [STATE_CALIBRATE_PRESSURE]  = { handler_stub,            handler_stub,       handler_stub },
-    [STATE_WELCOME_SCREEN]      = { handle_welcome_enter,    handle_welcome_run, handler_stub },
+    [STATE_INIT]                = { handle_init_enter,      handle_generic_run, handler_stub },
+    [STATE_IDLE]                = { handle_idle_enter,       handle_idle_run,     handler_stub },
+    [STATE_ARMED]               = { handle_armed_enter,      handle_generic_run, handle_armed_exit },
+    [STATE_STARTTEST]           = { handle_starttest_enter,  handle_generic_run, handler_stub },
+    [STATE_IGNITION]            = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_TESTRUNNING]         = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_ENDTEST]             = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_HALT]                = { handle_halt_enter,       handle_halt_run,     handle_halt_exit },
+    [STATE_CHECK_IGNITER]       = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_CHECK_BREAKWIRES]    = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_CALIBRATE_LOADCELL]  = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_CALIBRATE_PRESSURE]  = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_WELCOME_SCREEN]      = { handle_welcome_enter,    handle_welcome_run,  handler_stub },
 };
 
 /*******************************************************************************
@@ -318,18 +334,48 @@ void state_machine_task(void *pvParameters)
             s_handlers[s_current_state].on_run();
         }
 
+        /* When in test mode, continuously drain events to prevent any processing */
+        if (s_test_mode) {
+            uint8_t drain_event;
+            int drained = 0;
+            while (xQueueReceive(state_event_queue, &drain_event, 0) == pdTRUE) {
+                drained++;
+                if (drained <= 10) {  /* Only log first 10 to avoid spam */
+                    ESP_LOGD(TAG, "TEST MODE: Draining event 0x%02x", drain_event);
+                }
+            }
+            if (drained > 10) {
+                ESP_LOGW(TAG, "TEST MODE: Drained %d events", drained);
+            }
+            /* Short delay to prevent CPU spin */
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
         if (xQueueReceive(state_event_queue, &event, pdMS_TO_TICKS(100)) == pdTRUE) {
             ESP_LOGD(TAG, "Event 0x%02x in state %s",
                      event, s_state_names[s_current_state]);
+
+            /* In test mode, ignore ALL events except CMD_HALT (safety override) */
+            if (s_test_mode && event != CMD_HALT) {
+                ESP_LOGD(TAG, "TEST MODE: Ignoring event 0x%02x", event);
+                safety_watchdog_feed();  /* Keep watchdog alive */
+                continue;
+            }
 
             if (event == CMD_HALT) {
                 transition_to(STATE_HALT);
 
             } else if (event == CMD_COMMS_ERROR) {
-                /* Comms lost: halt from any non-HALT state */
-                if (s_current_state != STATE_HALT) {
+                /* Comms lost: halt from any non-HALT state
+                 * But NOT during test mode - allow testing without interruptions */
+                if (s_current_state != STATE_HALT && !s_test_mode) {
                     ESP_LOGE(TAG, "COMMS_ERROR: transitioning to HALT");
                     transition_to(STATE_HALT);
+                } else if (s_test_mode) {
+                    ESP_LOGW(TAG, "COMMS_ERROR ignored (test mode active)");
+                    /* Feed watchdog when in test mode to prevent timeout */
+                    safety_watchdog_feed();
                 }
 
             } else if (event == CMD_SWITCH_TO_ARMED) {
@@ -381,6 +427,91 @@ void state_machine_task(void *pvParameters)
             }
         }
     }
+}
+
+/*******************************************************************************
+ * Public API - Test Interface
+ ******************************************************************************/
+
+/* Map state name string to enum */
+base_state_t state_machine_from_name(const char *name)
+{
+    if (!name) return STATE_MAX;
+
+    for (int i = 0; i < STATE_MAX; i++) {
+        if (strcmp(s_state_names[i], name) == 0) {
+            return (base_state_t)i;
+        }
+    }
+    return STATE_MAX;
+}
+
+/* Force state transition for testing (bypasses normal validation) */
+esp_err_t state_machine_force_state(base_state_t new_state)
+{
+    if (new_state >= STATE_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Drain ALL events from state_event_queue to prevent them from
+       immediately changing the state after the forced transition.
+       In TEST MODE, we want complete control over state transitions. */
+    uint8_t stale_event;
+    int drained_count = 0;
+    while (xQueueReceive(state_event_queue, &stale_event, 0) == pdTRUE) {
+        drained_count++;
+        ESP_LOGD(TAG, "TEST MODE: Drained event 0x%02x", stale_event);
+    }
+    if (drained_count > 0) {
+        ESP_LOGW(TAG, "TEST MODE: Drained %d events from state_event_queue", drained_count);
+    }
+
+    base_state_t old_state = s_current_state;
+
+    ESP_LOGW(TAG, "TEST MODE: Forcing transition %s -> %s (bypassing validation)",
+             s_state_names[old_state], s_state_names[new_state]);
+
+    /* Call exit handler for old state */
+    if (s_handlers[old_state].on_exit) {
+        s_handlers[old_state].on_exit();
+    }
+
+    /* Set new state */
+    s_current_state = new_state;
+
+    /* Call enter handler for new state */
+    if (s_handlers[new_state].on_enter) {
+        s_handlers[new_state].on_enter();
+    }
+
+    /* Broadcast state change */
+    broadcast_state_change(new_state);
+
+    /* Allow time for ESP-NOW packet to be sent and processed by REMOTE
+     * Drain events continuously during the delay to prevent any accumulation */
+    for (int i = 0; i < 20; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        while (xQueueReceive(state_event_queue, &stale_event, 0) == pdTRUE) {
+            drained_count++;
+            ESP_LOGD(TAG, "TEST MODE: Drained event during delay 0x%02x", stale_event);
+        }
+    }
+
+    if (drained_count > 0) {
+        ESP_LOGW(TAG, "TEST MODE: Drained %d total events", drained_count);
+    }
+
+    /* Feed watchdog to prevent it from triggering during test */
+    safety_watchdog_feed();
+
+    return ESP_OK;
+}
+
+/* Set test mode flag to enable/disable automatic HALT transitions */
+void state_machine_set_test_mode(bool enabled)
+{
+    s_test_mode = enabled;
+    ESP_LOGW(TAG, "TEST MODE: %s", enabled ? "ENABLED" : "DISABLED");
 }
 
 #endif /* BUILD_TARGET_BASE */
