@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **State Transition Testing** - Fixed state transitions failing during automated tests
+  - Added test mode flag to prevent automatic HALT transitions during testing
+  - State machine now continuously drains events when in test mode
+  - Added TEST_MODE ON/OFF commands to test protocol
+  - All 7/7 state transitions now passing in automated tests
+
+### Added
+- **Automated State Broadcast Verification** - State broadcast test now fully automated
+  - Added BASE_STATE command to REMOTE to query received BASE state
+  - Test automatically compares BASE state with REMOTE's received state
+  - Eliminates need for visual verification during automated testing
+
+### Changed
+- State broadcast test no longer requires manual visual verification
+- WELCOME state skipped in transition tests (auto-transitions to IDLE by design)
+
 ## [1.0.53] - 2026-02-08
 
 ### Fixed
