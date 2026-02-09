@@ -49,17 +49,26 @@ def setup_file_logging(log_dir: str = "scripts/test_results") -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     _log_file_path = os.path.join(log_dir, f"test_run_{timestamp}.log")
 
-    # Setup logger
+    # Setup logger - clear any existing handlers first
     _file_logger = logging.getLogger("interactive_test")
+    _file_logger.handlers.clear()  # Remove any old handlers
     _file_logger.setLevel(logging.DEBUG)
+    _file_logger.propagate = False  # Don't propagate to root logger
 
-    # File handler
-    fh = logging.FileHandler(_log_file_path)
+    # File handler with immediate flush
+    fh = logging.FileHandler(_log_file_path, mode='w')
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    # Immediate flush for every write
+    fh.flush = lambda: fh.stream.flush()  # Override flush to ensure immediate write
     _file_logger.addHandler(fh)
 
+    # Force flush the file handler to ensure file is created
+    fh.flush()
+
     _file_logger.info(f"Test run started at {datetime.now().isoformat()}")
+    _file_logger.handlers[0].flush()  # Immediate flush
+
     return _log_file_path
 
 
@@ -70,6 +79,9 @@ def log(level: str, message: str, response: Optional[dict] = None):
         log_fn(message)
         if response:
             _file_logger.debug(f"  Response: {json.dumps(response)}")
+        # Immediate flush
+        for handler in _file_logger.handlers:
+            handler.flush()
 
 
 def log_test_result(name: str, target: str, passed: bool, skipped: bool, detail: str, response: Optional[dict] = None):
@@ -79,6 +91,22 @@ def log_test_result(name: str, target: str, passed: bool, skipped: bool, detail:
         _file_logger.info(f"[{status}] {target}: {name} - {detail}")
         if response:
             _file_logger.debug(f"  Response: {json.dumps(response)}")
+        # Immediate flush
+        for handler in _file_logger.handlers:
+            handler.flush()
+
+
+def close_log_logging():
+    """Close the file logger and flush all buffers."""
+    global _file_logger, _log_file_path
+    if _file_logger:
+        _file_logger.info(f"Test run completed at {datetime.now().isoformat()}")
+        # Flush and close all handlers
+        for handler in _file_logger.handlers[:]:
+            handler.flush()
+            handler.close()
+            _file_logger.removeHandler(handler)
+        _file_logger = None
 
 
 # ── ANSI Color Constants ──────────────────────────────────────────────────────
@@ -259,8 +287,17 @@ class InteractiveTestSuite:
         # Category counters
         self.category_stats: dict[str, dict] = {}
 
+    def verify_firmware(self, conn: SerialConnection, expected_target: str) -> bool:
+        """Verify that the correct firmware is flashed on the device."""
+        resp = conn.send_command("INFO")
+        if not resp or resp.get("status") != "ok":
+            return False
+
+        actual_target = resp.get("data", {}).get("target", "")
+        return actual_target == expected_target
+
     def connect_devices(self) -> bool:
-        """Connect to both devices. Returns True if at least one connected."""
+        """Connect to both devices and verify firmware. Returns True if at least one connected."""
         print(f"\n{c(Colors.BOLD, 'Connecting to devices...')}")
         log("info", "Connecting to devices...")
 
@@ -269,6 +306,18 @@ class InteractiveTestSuite:
         if self.base.open():
             print(f"  BASE   ({self.base_port}): {c(Colors.GREEN, 'Connected')} {c(Colors.GREEN, chr(0x2713))}")
             log("info", f"BASE ({self.base_port}): Connected")
+
+            # Verify firmware
+            if self.verify_firmware(self.base, "BASE"):
+                print(f"         {c(Colors.GREEN, chr(0x2713) + ' Verified: BASE firmware')}")
+                log("info", "BASE firmware verified")
+            else:
+                print(f"         {c(Colors.RED, chr(0x2717) + ' WARNING: Wrong firmware detected!')}")
+                resp = self.base.send_command("INFO")
+                actual = resp.get("data", {}).get("target", "UNKNOWN") if resp else "UNKNOWN"
+                print(f"         Expected: BASE, Got: {c(Colors.BOLD, actual)}")
+                print(f"         {c(Colors.YELLOW, 'Please flash correct firmware!')}")
+                log("error", f"BASE has wrong firmware: {actual} instead of BASE")
         else:
             print(f"  BASE   ({self.base_port}): {c(Colors.RED, 'FAILED')}")
             log("error", f"BASE ({self.base_port}): Connection FAILED")
@@ -279,6 +328,18 @@ class InteractiveTestSuite:
         if self.remote.open():
             print(f"  REMOTE ({self.remote_port}): {c(Colors.GREEN, 'Connected')} {c(Colors.GREEN, chr(0x2713))}")
             log("info", f"REMOTE ({self.remote_port}): Connected")
+
+            # Verify firmware
+            if self.verify_firmware(self.remote, "REMOTE"):
+                print(f"         {c(Colors.GREEN, chr(0x2713) + ' Verified: REMOTE firmware')}")
+                log("info", "REMOTE firmware verified")
+            else:
+                print(f"         {c(Colors.RED, chr(0x2717) + ' WARNING: Wrong firmware detected!')}")
+                resp = self.remote.send_command("INFO")
+                actual = resp.get("data", {}).get("target", "UNKNOWN") if resp else "UNKNOWN"
+                print(f"         Expected: REMOTE, Got: {c(Colors.BOLD, actual)}")
+                print(f"         {c(Colors.YELLOW, 'Please flash correct firmware!')}")
+                log("error", f"REMOTE has wrong firmware: {actual} instead of REMOTE")
         else:
             print(f"  REMOTE ({self.remote_port}): {c(Colors.RED, 'FAILED')}")
             log("error", f"REMOTE ({self.remote_port}): Connection FAILED")
@@ -627,23 +688,28 @@ class InteractiveTestSuite:
         log("debug", "Sent BUZZER OFF", resp)
         time.sleep(0.3)
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} Playing short beep...")
-        print(f"         {c(Colors.DIM, 'Buzzer should sound for ~100ms')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Starting continuous beep...")
+        print(f"         {c(Colors.DIM, 'Buzzer will beep continuously until you respond')}")
+        print(f"         {c(Colors.BOLD, '>>> LISTEN FOR THE BUZZER NOW <<<')}")
 
-        # Play a short beep using the buzzer task
-        resp = conn.send_command("BUZZER SHORT")
-        result.response = resp
-        log("debug", "Sent BUZZER SHORT", resp)
+        # Use BUZZER ALARM pattern which beeps continuously
+        resp = conn.send_command("BUZZER ALARM")
+        log("debug", "Sent BUZZER ALARM", resp)
 
-        if resp is None:
-            result.detail = "No response to BUZZER command - firmware may need update"
-            log("warning", "BUZZER command not recognized - falling back to GPIO")
-            # Fallback to GPIO if BUZZER command not supported
-            conn.send_command(f"GPIO WRITE {pin} 0")
-            time.sleep(0.5)
-            conn.send_command(f"GPIO WRITE {pin} 1")
+        # Give buzzer time to start beeping
+        time.sleep(0.5)
 
-        response = self.ask_user("Did you hear the buzzer beep?")
+        response = self.ask_user("Can you hear the buzzer beeping?")
+
+        # Stop the buzzer
+        print(f"         {c(Colors.INFO, chr(0x2192))} Stopping buzzer...")
+        resp = conn.send_command("BUZZER OFF")
+        log("debug", "Sent BUZZER OFF", resp)
+        time.sleep(0.2)
+
+        # Also ensure GPIO is high (active-low off)
+        conn.send_command(f"GPIO WRITE {pin} 1")
+
         if response == 'y':
             result.passed = True
             result.detail = "User confirmed buzzer sound"
@@ -652,9 +718,6 @@ class InteractiveTestSuite:
             result.detail = "Skipped by user"
         else:
             result.detail = "User did not hear buzzer"
-
-        # Ensure buzzer is off after test
-        conn.send_command("BUZZER OFF")
 
     # ── LED Tests ─────────────────────────────────────────────────────────────
 
@@ -688,8 +751,9 @@ class InteractiveTestSuite:
             self.print_test_result(result)
 
     def _test_neopixel_led(self, result: TestResult, conn: SerialConnection):
-        """Test the Neopixel RGB LED on GPIO 47."""
-        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to RED...")
+        """Test the Neopixel RGB LED on GPIO 48."""
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to bright RED...")
+        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
 
         resp = conn.send_command("LED SET 255 0 0 solid")
         result.response = resp
@@ -700,35 +764,49 @@ class InteractiveTestSuite:
             log("warning", "LED command failed or not recognized")
             return
 
-        response = self.ask_user("Is the LED glowing RED?")
+        # Wait for LED to update (rgb_led_task runs every 20ms)
+        time.sleep(0.3)
+
+        response = self.ask_user("Is the LED glowing bright RED?")
         if response != 'y':
             if response == 's':
                 result.skipped = True
                 result.detail = "Skipped by user"
-                conn.send_command("LED OFF")
+                conn.send_command("LED STATE")
                 return
-            result.detail = "LED not showing RED"
-            conn.send_command("LED OFF")
+            result.detail = "LED not showing RED (check GPIO 48 connection)"
+            conn.send_command("LED STATE")
             return
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to GREEN...")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to bright GREEN...")
+        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
         conn.send_command("LED SET 0 255 0 solid")
+        time.sleep(0.3)
 
-        response = self.ask_user("Is the LED glowing GREEN?")
+        response = self.ask_user("Is the LED glowing bright GREEN?")
         if response != 'y':
             if response == 's':
                 result.skipped = True
                 result.detail = "Skipped by user"
+                conn.send_command("LED STATE")
             else:
-                result.detail = "LED not showing GREEN"
-            conn.send_command("LED OFF")
+                result.detail = "LED not showing GREEN (green channel may have issue)"
+            conn.send_command("LED STATE")
             return
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to BLUE...")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to bright BLUE...")
+        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
         conn.send_command("LED SET 0 0 255 solid")
+        time.sleep(0.3)
 
-        response = self.ask_user("Is the LED glowing BLUE?")
-        conn.send_command("LED OFF")
+        response = self.ask_user("Is the LED glowing bright BLUE?")
+
+        # Restore LED to state color instead of turning it off
+        print(f"         {c(Colors.INFO, chr(0x2192))} Restoring LED to state color...")
+        conn.send_command("LED STATE")
+
+        # Wait for LED to update to state color (rgb_led_task runs every 20ms)
+        time.sleep(0.5)
 
         if response == 'y':
             result.passed = True
@@ -737,7 +815,7 @@ class InteractiveTestSuite:
             result.skipped = True
             result.detail = "Skipped by user"
         else:
-            result.detail = "LED not showing BLUE"
+            result.detail = "LED not showing BLUE (blue channel may have issue)"
 
     def _test_gpio_led(self, result: TestResult, conn: SerialConnection, pin: int, description: str):
         """Test a simple GPIO LED."""
@@ -775,10 +853,26 @@ class InteractiveTestSuite:
         state_name = resp.get("data", {}).get("name", "UNKNOWN")
         expected_color = self.STATE_COLORS.get(state_name, "Unknown")
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} Current state: {c(Colors.BOLD, state_name)}")
-        print(f"         {c(Colors.DIM, f'Expected RGB LED color: {expected_color}')}")
+        # More descriptive message
+        color_desc = {
+            "Blue": "solid blue",
+            "Yellow pulsing": "yellow that fades in and out",
+            "Red": "solid red",
+            "Green": "solid green",
+            "Red pulsing": "red that fades in and out slowly",
+            "Magenta pulsing": "magenta/purple that fades in and out",
+        }.get(expected_color, expected_color)
 
-        response = self.ask_user(f"Does the RGB LED show {expected_color}?")
+        print(f"\n         {c(Colors.BOLD, 'RGB LED STATE TEST')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Current state: {c(Colors.BOLD, state_name)}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} The RGB LED should show: {c(Colors.BOLD, color_desc)}")
+        print(f"         {c(Colors.DIM, '(The LED was just restored to state color)')}")
+        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
+
+        # Add a small delay to let the user observe the LED
+        time.sleep(0.3)
+
+        response = self.ask_user(f"Does the RGB LED show {color_desc}?")
 
         if response == 'y':
             result.passed = True
@@ -787,7 +881,7 @@ class InteractiveTestSuite:
             result.skipped = True
             result.detail = "Skipped by user"
         else:
-            result.detail = f"RGB LED color mismatch for state {state_name}"
+            result.detail = f"RGB LED color mismatch for state {state_name} (expected: {expected_color})"
 
     # ── Display Tests ─────────────────────────────────────────────────────────
 
@@ -873,7 +967,7 @@ class InteractiveTestSuite:
         initial = self.remote.send_command("QUEUE STATUS")
         initial_count = initial.get("data", {}).get("input_event", 0) if initial else 0
 
-        if not self.wait_for_input("Press the button now...", timeout=10.0):
+        if not self.wait_for_input("Press the button now...", timeout=50.0):
             result.skipped = True
             result.detail = "Timeout waiting for button press"
             return
@@ -894,7 +988,7 @@ class InteractiveTestSuite:
     def _test_button_long(self, result: TestResult):
         print(f"         {c(Colors.INFO, chr(0x2192))} Press and HOLD the button for 3 seconds")
 
-        if not self.wait_for_input("Hold the button now...", timeout=30.0):
+        if not self.wait_for_input("Hold the button now...", timeout=50.0):
             result.skipped = True
             result.detail = "Timeout waiting for long press"
             return
@@ -923,7 +1017,7 @@ class InteractiveTestSuite:
         print(f"         {c(Colors.INFO, chr(0x2192))} Current state: {c(Colors.BOLD, before_state)}")
         print(f"         {c(Colors.DIM, 'Toggle the ARM/SAFE switch')}")
 
-        if not self.wait_for_input("Toggle the switch now...", timeout=30.0):
+        if not self.wait_for_input("Toggle the switch now...", timeout=50.0):
             result.skipped = True
             result.detail = "Timeout waiting for switch toggle"
             return
@@ -1065,8 +1159,19 @@ class InteractiveTestSuite:
 
         expected_color = self.STATE_COLORS.get(state_name, "Unknown")
 
+        # Get more descriptive color name
+        color_desc = {
+            "Blue": "solid blue",
+            "Yellow pulsing": "yellow that fades in and out",
+            "Red": "solid red",
+            "Green": "solid green",
+            "Red pulsing": "red that fades in and out slowly",
+            "Magenta pulsing": "magenta/purple that fades in and out",
+        }.get(expected_color, expected_color)
+
         print(f"         {c(Colors.INFO, chr(0x2192))} State: {state_num} ({c(Colors.BOLD, state_name)})")
-        print(f"         {c(Colors.DIM, f'Expected LED color: {expected_color}')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Expected LED color: {c(Colors.BOLD, color_desc)}")
+        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
 
         response = self.ask_user("Does the RGB LED color match?")
 
@@ -1139,8 +1244,9 @@ class InteractiveTestSuite:
             result.passed = True  # Not a hard failure - watchdog may be hardware-based
 
     def _test_safe_gpio(self, result: TestResult):
-        # Check igniter pins are in safe state (GPIO 40, 41 should be 0)
-        resp1 = self.base.send_command("GPIO READ 40")
+        # Check igniter pins are in safe state (GPIO 4 and 41 should be 0)
+        # GPIO 4 = igniter power, GPIO 41 = igniter control
+        resp1 = self.base.send_command("GPIO READ 4")
         resp2 = self.base.send_command("GPIO READ 41")
 
         level1 = resp1.get("data", {}).get("level", -1) if resp1 else -1
@@ -1148,11 +1254,144 @@ class InteractiveTestSuite:
 
         if level1 == 0 and level2 == 0:
             result.passed = True
-            result.detail = "Igniter pins (GPIO 40, 41) are LOW (safe)"
+            result.detail = "Igniter pins (GPIO 4, 41) are LOW (safe)"
         elif level1 == -1 or level2 == -1:
             result.detail = "Could not read igniter GPIO pins"
         else:
-            result.detail = f"WARNING: Igniter pins not LOW (GPIO40={level1}, GPIO41={level2})"
+            result.detail = f"WARNING: Igniter pins not LOW (GPIO4={level1}, GPIO41={level2})"
+
+    def _get_failure_causes(self, result: TestResult) -> list[str]:
+        """Return possible causes for a test failure based on test type."""
+        causes = []
+
+        test_name_lower = result.name.lower()
+
+        if "ping" in test_name_lower:
+            causes = [
+                "Device not responsive or crashed",
+                "Serial communication issue (check cable/port)",
+                "Device still booting (wait a few seconds)",
+                "Wrong firmware flashed (BASE vs REMOTE swapped)"
+            ]
+
+        elif "info" in test_name_lower and "target" in result.detail.lower():
+            causes = [
+                "Wrong firmware built/flash (BUILD_TARGET mismatch)",
+                "BASE firmware flashed on REMOTE or vice versa",
+                "Rebuild with correct BUILD_TARGET setting"
+            ]
+
+        elif "heap" in test_name_lower:
+            causes = [
+                "Memory leak in firmware",
+                "PSRAM not initialized properly",
+                "Insufficient heap for application"
+            ]
+
+        elif "tasks" in test_name_lower:
+            if "missing task" in result.detail.lower():
+                causes = [
+                    "Required FreeRTOS task not created",
+                    "Firmware may not be fully initialized",
+                    "Wrong firmware type (BASE/REMOTE have different tasks)"
+                ]
+            elif "stack_hwm" in result.detail.lower():
+                causes = [
+                    "Task stack too small - increase STACK_SIZE_* in config.h",
+                    "Stack overflow detected - check for deep recursion"
+                ]
+            else:
+                causes = [
+                    "Task creation failed",
+                    "System may be low on memory"
+                ]
+
+        elif "queue" in test_name_lower:
+            causes = [
+                "Message queue backing up - processing too slow",
+                "Producer task sending faster than consumer can process",
+                "Possible deadlock or blocked consumer task"
+            ]
+
+        elif "espnow" in test_name_lower:
+            causes = [
+                "ESP-NOW initialization failed",
+                "WiFi driver not started properly",
+                "NVS flash corruption (try erasing NVS)",
+                "MAC address mismatch in config.h"
+            ]
+
+        elif "buzzer" in test_name_lower:
+            causes = [
+                "Buzzer not connected (GPIO 42)",
+                "Buzzer hardware defective",
+                "Firmware doesn't support BUZZER command (update firmware)",
+                "Wrong GPIO pin configured in config.h"
+            ]
+
+        elif "led" in test_name_lower and "rgb" in test_name_lower:
+            causes = [
+                "WS2812/Neopixel LED not connected (GPIO 48)",
+                "LED power supply missing",
+                "LED data line wiring issue",
+                "Firmware doesn't support LED command (update firmware)"
+            ]
+
+        elif "display" in test_name_lower:
+            causes = [
+                "OLED display not connected (I2C SDA:8, SCL:9)",
+                "Display power missing",
+                "I2C address mismatch (default 0x3C)",
+                "Display driver not initialized"
+            ]
+
+        elif "button" in test_name_lower or "input" in test_name_lower:
+            causes = [
+                "Button/switch not wired correctly",
+                "GPIO pin mismatch in config.h",
+                "Input handler task not running",
+                "Debounce issue (adjust DEBOUNCE_MS in config.h)"
+            ]
+
+        elif "communication" in test_name_lower or "state" in test_name_lower:
+            causes = [
+                "ESP-NOW link not established between units",
+                "Units too far apart or obstructed",
+                "MAC address mismatch in config.h",
+                "Both units must be powered on"
+            ]
+
+        elif "gpio" in test_name_lower:
+            causes = [
+                "GPIO pin not configured correctly",
+                "Pin multiplexed with another peripheral",
+                "Hardware issue with GPIO pin"
+            ]
+
+        elif "safety" in test_name_lower or "igniter" in test_name_lower:
+            causes = [
+                "Igniter pins in unsafe state - CHECK HARDWARE",
+                "Firmware failed to initialize GPIOs",
+                "Possible electrical issue with igniter circuit"
+            ]
+
+        else:
+            causes = [
+                "Unknown test failure",
+                "Check device logs for more details",
+                "Hardware or firmware issue"
+            ]
+
+        # Add generic causes at the end
+        if result.detail and "timeout" in result.detail.lower():
+            causes.append("Serial communication timeout")
+            causes.append("Device may be frozen or in bootloader mode")
+
+        if result.detail and "no response" in result.detail.lower():
+            causes.append("Test protocol not initialized")
+            causes.append("Device may have crashed")
+
+        return causes
 
     # ── Main Execution ────────────────────────────────────────────────────────
 
@@ -1256,6 +1495,30 @@ class InteractiveTestSuite:
             print(f"\n  {c(Colors.YELLOW, f'{chr(0x2713)} All run tests passed ({total_skipped} skipped)')}")
         else:
             print(f"\n  {c(Colors.RED, f'{chr(0x2717)} {total_failed} test(s) failed')}")
+
+            # Print detailed failure information
+            print()
+            print(c(Colors.BOLD + Colors.RED, "  FAILED TEST DETAILS:"))
+            print(c(Colors.DIM, "  " + "-" * 64))
+
+            for result in self.results:
+                if not result.passed and not result.skipped:
+                    # Print test name and target
+                    print(f"\n  {c(Colors.BOLD + Colors.RED, chr(0x2717) + ' ' + result.name)}")
+                    print(f"    Target: {c(Colors.CYAN, result.target)}")
+
+                    # Print error/detail
+                    if result.detail:
+                        print(f"    Error:  {c(Colors.YELLOW, result.detail)}")
+
+                    # Print possible causes based on test type
+                    print(f"    {c(Colors.DIM, 'Possible causes:')}")
+                    causes = self._get_failure_causes(result)
+                    for cause in causes:
+                        print(f"      {c(Colors.DIM, chr(0x2022) + ' ' + cause)}")
+
+            print()
+            print(c(Colors.DIM, "  " + "-" * 64))
 
         print()
 
@@ -1394,6 +1657,7 @@ Examples:
 
     finally:
         suite.disconnect_devices()
+        close_log_logging()  # Flush and close log file
 
 
 if __name__ == "__main__":

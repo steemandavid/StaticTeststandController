@@ -140,10 +140,30 @@ void remote_main(void)
     /* Serial test protocol (automated testing interface) */
     ESP_ERROR_CHECK(test_protocol_init());
     xTaskCreate(test_protocol_task, "test_proto",
-                STACK_SIZE_DEFAULT, NULL,
-                1, NULL);  /* Lowest priority - background service */
+                STACK_SIZE_TEST_PROTO, NULL,
+                TASK_PRIORITY_TEST_PROTO, NULL);
 
-    /* Set initial LED color: green breathing = waiting */
+    /* Startup notification: 3 beeps + LED flash pattern */
+    ESP_LOGI(TAG, "Playing startup notification (GPIO mode for quick beeps)");
+
+    /* Use direct GPIO for boot beeps (buzzer task not ready yet) */
+    for (int i = 0; i < 3; i++) {
+        gpio_set_level(PIN_BUZZER, 0);  /* ON (active low) */
+        vTaskDelay(pdMS_TO_TICKS(150));
+        gpio_set_level(PIN_BUZZER, 1);  /* OFF (active low) */
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    rgb_led_set(0, 255, 0, LED_PATTERN_SOLID);  /* Green */
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    rgb_led_set(255, 255, 0, LED_PATTERN_SOLID);  /* Yellow */
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    rgb_led_set(0, 0, 255, LED_PATTERN_SOLID);  /* Blue */
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    /* Return to default state color: green breathing = waiting */
     rgb_led_set(0, 255, 0, LED_PATTERN_BREATHING);
 
     ESP_LOGI(TAG, "REMOTE unit initialized, tasks running");

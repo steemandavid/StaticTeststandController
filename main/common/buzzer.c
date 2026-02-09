@@ -3,13 +3,14 @@
  *
  * Pattern-based buzzer driver for both BASE and REMOTE units.
  * Uses a FreeRTOS queue to receive pattern requests and drives
- * PIN_BUZZER low/high with appropriate timing (active-low buzzers).
+ * PIN_BUZZER with PWM tone generation (active-low buzzers).
  ******************************************************************************/
 
 #include "config.h"
 #include "buzzer.h"
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,6 +19,13 @@
 static const char *TAG = "buzzer";
 
 static QueueHandle_t s_buzzer_queue = NULL;
+
+/* LEDC PWM configuration for tone generation */
+#define BUZZER_LEDC_TIMER       LEDC_TIMER_0
+#define BUZZER_LEDC_MODE        LEDC_LOW_SPEED_MODE
+#define BUZZER_LEDC_CHANNEL     LEDC_CHANNEL_0
+#define BUZZER_LEDC_DUTY_RES    5000  /* 50% duty cycle */
+#define BUZZER_FREQ_HZ         4000  /* PWM frequency */
 
 esp_err_t buzzer_init(void)
 {
@@ -28,7 +36,31 @@ esp_err_t buzzer_init(void)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Buzzer initialized");
+    /* Configure LEDC PWM for tone generation */
+    ledc_timer_config_t timer_conf = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_13_BIT, /* 5000 = 50% duty @ 13-bit */
+        .timer_num = BUZZER_LEDC_TIMER,
+        .freq_hz = BUZZER_FREQ_HZ,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&timer_conf));
+
+    ledc_channel_config_t channel_conf = {
+        .gpio_num = PIN_BUZZER,
+        .speed_mode = BUZZER_LEDC_MODE,
+        .channel = BUZZER_LEDC_CHANNEL,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = BUZZER_LEDC_TIMER,
+        .duty = 0,
+        .hpoint = 0,
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&channel_conf));
+
+    /* Start with buzzer OFF (GPIO high for active-low) */
+    gpio_set_level(PIN_BUZZER, 1);
+
+    ESP_LOGI(TAG, "Buzzer initialized (PWM tone mode)");
     return ESP_OK;
 }
 
@@ -46,12 +78,16 @@ void buzzer_stop(void)
 
 static void buzzer_on(void)
 {
-    gpio_set_level(PIN_BUZZER, 0);  /* Active low */
+    /* Enable tone output at 4000Hz with 50% duty cycle */
+    ledc_set_duty(BUZZER_LEDC_MODE, BUZZER_LEDC_CHANNEL, BUZZER_LEDC_DUTY_RES);
+    ledc_update_duty(BUZZER_LEDC_MODE, BUZZER_LEDC_CHANNEL);
 }
 
 static void buzzer_off(void)
 {
-    gpio_set_level(PIN_BUZZER, 1);  /* Active low */
+    /* Completely stop LEDC PWM and set GPIO high (active-low buzzer off) */
+    ledc_stop(BUZZER_LEDC_MODE, BUZZER_LEDC_CHANNEL, 1);  /* 1 = output high level after stop */
+    gpio_set_level(PIN_BUZZER, 1);  /* Active low - high = off (redundant but safe) */
 }
 
 void buzzer_task(void *pvParameters)

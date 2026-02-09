@@ -137,6 +137,7 @@
 #define TASK_PRIORITY_BUZZER        3
 #define TASK_PRIORITY_PING_MONITOR  3
 #define TASK_PRIORITY_DISPLAY       3
+#define TASK_PRIORITY_TEST_PROTO     3  /* Increased from 1 to prevent starvation */
 #define TASK_PRIORITY_BAT_MONITOR   2
 
 /*******************************************************************************
@@ -147,6 +148,7 @@
 #define STACK_SIZE_SD_LOGGING       8192
 #define STACK_SIZE_DISPLAY          4096
 #define STACK_SIZE_BUZZER           3072
+#define STACK_SIZE_TEST_PROTO       16384  /* Large stack for JSON formatting */
 
 /*******************************************************************************
  * Safety Constants

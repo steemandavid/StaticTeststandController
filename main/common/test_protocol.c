@@ -225,6 +225,34 @@ static void handle_buzzer(const char *args)
 
 static void handle_led(const char *args)
 {
+    if (strcmp(args, "STATE") == 0) {
+#ifdef BUILD_TARGET_BASE
+        /* Restore LED to current state color */
+        base_state_t state = state_machine_get_state();
+        switch (state) {
+            case STATE_IDLE:
+                rgb_led_set(0, 255, 0, LED_PATTERN_BREATHING);
+                break;
+            case STATE_ARMED:
+                rgb_led_set(255, 165, 0, LED_PATTERN_SOLID);
+                break;
+            case STATE_HALT:
+                rgb_led_set(255, 0, 0, LED_PATTERN_PULSE_HALF_HZ);
+                break;
+            case STATE_WELCOME_SCREEN:
+                rgb_led_set(0, 0, 255, LED_PATTERN_BREATHING);
+                break;
+            default:
+                rgb_led_set(0, 255, 0, LED_PATTERN_BREATHING);
+                break;
+        }
+        send_ok("LED", "{\"restored\":\"state\"}");
+#else
+        send_error("LED", "LED STATE only available on BASE unit");
+#endif
+        return;
+    }
+
     if (strcmp(args, "OFF") == 0) {
         rgb_led_set(0, 0, 0, LED_PATTERN_OFF);
         send_ok("LED", "{\"r\":0,\"g\":0,\"b\":0,\"pattern\":\"off\"}");
