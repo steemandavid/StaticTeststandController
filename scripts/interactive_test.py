@@ -38,17 +38,33 @@ except ImportError:
 _file_logger: Optional[logging.Logger] = None
 _log_file_path: Optional[str] = None
 
+# JSON results file for structured output
+_json_results_path: Optional[str] = None
+_json_results: list[dict] = []
+_test_run_start_time: Optional[str] = None
 
-def setup_file_logging(log_dir: str = "scripts/test_results") -> str:
-    """Setup file logging and return the log file path."""
-    global _file_logger, _log_file_path
+
+def setup_file_logging(log_dir: str = "scripts/test_results") -> tuple[str, str]:
+    """Setup file logging and return the log file path and JSON results path."""
+    global _file_logger, _log_file_path, _json_results_path, _json_results, _test_run_start_time
 
     # Create log directory
     os.makedirs(log_dir, exist_ok=True)
 
-    # Create timestamped log file
+    # Create timestamped files
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _test_run_start_time = datetime.now().isoformat()
     _log_file_path = os.path.join(log_dir, f"test_run_{timestamp}.log")
+    _json_results_path = os.path.join(log_dir, f"test_run_{timestamp}.json")
+    _json_results = []
+
+    # Initialize JSON results with metadata
+    _json_results.append({
+        "type": "test_run_start",
+        "timestamp": _test_run_start_time,
+        "log_file": _log_file_path,
+        "json_file": _json_results_path
+    })
 
     # Setup logger - clear any existing handlers first
     _file_logger = logging.getLogger("interactive_test")
@@ -65,14 +81,30 @@ def setup_file_logging(log_dir: str = "scripts/test_results") -> str:
     # Force flush the file handler to ensure file is created
     fh.flush()
 
-    _file_logger.info(f"Test run started at {datetime.now().isoformat()}")
+    _file_logger.info(f"Test run started at {_test_run_start_time}")
+    _file_logger.info(f"JSON results file: {_json_results_path}")
     _file_logger.handlers[0].flush()  # Immediate flush
 
-    return _log_file_path
+    # Write initial JSON file
+    _write_json_results()
+
+    return _log_file_path, _json_results_path
+
+
+def _write_json_results():
+    """Write JSON results to file."""
+    global _json_results_path, _json_results
+    if _json_results_path:
+        try:
+            with open(_json_results_path, 'w') as f:
+                json.dump(_json_results, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Failed to write JSON results: {e}", file=sys.stderr)
 
 
 def log(level: str, message: str, response: Optional[dict] = None):
     """Log message to file with optional JSON response."""
+    global _json_results
     if _file_logger:
         log_fn = getattr(_file_logger, level.lower(), _file_logger.info)
         log_fn(message)
@@ -83,29 +115,84 @@ def log(level: str, message: str, response: Optional[dict] = None):
             handler.flush()
 
 
-def log_test_result(name: str, target: str, passed: bool, skipped: bool, detail: str, response: Optional[dict] = None):
-    """Log a test result to file."""
+def log_test_result(name: str, target: str, passed: bool, skipped: bool, detail: str,
+                    response: Optional[dict] = None, duration_ms: int = 0, category: str = "Unknown"):
+    """Log a test result to both file and JSON."""
+    global _json_results
+    timestamp = datetime.now().isoformat()
+    status = "SKIP" if skipped else ("PASS" if passed else "FAIL")
+
+    # Log to file
     if _file_logger:
-        status = "SKIP" if skipped else ("PASS" if passed else "FAIL")
         _file_logger.info(f"[{status}] {target}: {name} - {detail}")
         if response:
             _file_logger.debug(f"  Response: {json.dumps(response)}")
+        _file_logger.info(f"  Duration: {duration_ms}ms, Category: {category}")
         # Immediate flush
         for handler in _file_logger.handlers:
             handler.flush()
 
+    # Add to JSON results
+    test_result = {
+        "type": "test_result",
+        "timestamp": timestamp,
+        "name": name,
+        "target": target,
+        "category": category,
+        "status": status,
+        "passed": passed,
+        "skipped": skipped,
+        "detail": detail,
+        "duration_ms": duration_ms
+    }
+    if response:
+        test_result["response"] = response
 
-def close_log_logging():
-    """Close the file logger and flush all buffers."""
-    global _file_logger, _log_file_path
+    _json_results.append(test_result)
+    _write_json_results()
+
+
+def close_log_logging(category_stats: dict):
+    """Close the file logger and write final summary."""
+    global _file_logger, _log_file_path, _json_results, _test_run_start_time
+    end_time = datetime.now().isoformat()
+
     if _file_logger:
-        _file_logger.info(f"Test run completed at {datetime.now().isoformat()}")
+        _file_logger.info(f"Test run completed at {end_time}")
         # Flush and close all handlers
         for handler in _file_logger.handlers[:]:
             handler.flush()
             handler.close()
             _file_logger.removeHandler(handler)
         _file_logger = None
+
+    # Write final summary to JSON
+    total_passed = sum(s.get("passed", 0) for s in category_stats.values())
+    total_failed = sum(s.get("failed", 0) for s in category_stats.values())
+    total_skipped = sum(s.get("skipped", 0) for s in category_stats.values())
+    total_tests = sum(s.get("total", 0) for s in category_stats.values())
+
+    summary = {
+        "type": "test_run_summary",
+        "start_time": _test_run_start_time,
+        "end_time": end_time,
+        "total_passed": total_passed,
+        "total_failed": total_failed,
+        "total_skipped": total_skipped,
+        "total_tests": total_tests,
+        "category_breakdown": category_stats,
+        "success_rate": f"{(total_passed / total_tests * 100):.1f}%" if total_tests > 0 else "N/A"
+    }
+
+    _json_results.append(summary)
+    _write_json_results()
+
+    # Print summary to console
+    print()
+    print(c(Colors.DIM, f"Results saved to:"))
+    print(c(Colors.DIM, f"  Log:  {_log_file_path}"))
+    print(c(Colors.DIM, f"  JSON: {_json_results_path}"))
+    print()
 
 
 # ── ANSI Color Constants ──────────────────────────────────────────────────────
@@ -210,16 +297,15 @@ class SerialConnection:
         """
         Send a command and return the JSON response.
 
-        Commands are automatically prefixed with 'TEST ' if they start with
-        a TEST protocol command (PING, INFO, etc.), or sent as-is for GPIO commands.
+        Commands are automatically prefixed with 'TEST ' if they don't already start with it.
         """
         if not self.ser:
             return None
 
         timeout = timeout or self.timeout
 
-        # Prefix with TEST if needed
-        if not command.startswith("TEST ") and not command.startswith("GPIO "):
+        # Prefix with TEST if needed (ALL commands need TEST prefix)
+        if not command.startswith("TEST "):
             command = f"TEST {command}"
 
         self.ser.reset_input_buffer()
@@ -451,8 +537,9 @@ class InteractiveTestSuite:
         result.duration_ms = int((time.monotonic() - start) * 1000)
         self.results.append(result)
 
-        # Log result to file
-        log_test_result(name, target, result.passed, result.skipped, result.detail, result.response)
+        # Log result to file and JSON
+        log_test_result(name, target, result.passed, result.skipped, result.detail,
+                       result.response, result.duration_ms, category)
 
         # Update category stats
         if category not in self.category_stats:
@@ -817,23 +904,49 @@ class InteractiveTestSuite:
             result.detail = "LED not showing BLUE (blue channel may have issue)"
 
     def _test_gpio_led(self, result: TestResult, conn: SerialConnection, pin: int, description: str):
-        """Test a simple GPIO LED."""
-        print(f"         {c(Colors.INFO, chr(0x2192))} Turning ON {description} (GPIO {pin})...")
+        """Test a simple GPIO LED with OFF-then-ON sequence for visibility."""
+        print()
+        print(f"         {c(Colors.BOLD, f'{description.upper()} TEST')}")
+        print(f"         {c(Colors.DIM, '=' * 60)}")
+        print()
+        print(f"         {c(Colors.CYAN, 'This test will blink the button LED to verify it works.')}")
+        print()
+        print(f"         {c(Colors.BOLD, 'INSTRUCTIONS:')}")
+        print(f"         {c(Colors.WHITE, '  The LED will be turned OFF, then ON.')}")
+        print(f"         {c(Colors.WHITE, '  Watch for a clear OFF -> ON transition.')}")
+        print()
+        print(f"         {c(Colors.DIM, 'Looking at the button LED...')}")
+        print()
+
+        # First, turn OFF explicitly to create a visible change
+        print(f"         {c(Colors.INFO, chr(0x2192))} Turning {c(Colors.BOLD, description)} OFF (GPIO {pin})...")
+        resp = conn.send_command(f"GPIO WRITE {pin} 0")
+        log("debug", f"GPIO WRITE {pin} 0", resp)
+        time.sleep(1.0)  # Keep it off for 1 second so the change is visible
+
+        print()
+        print(f"         {c(Colors.INFO, chr(0x2192))} Turning {c(Colors.BOLD, description)} ON (GPIO {pin})...")
+        print(f"         {c(Colors.BOLD, '>>> WATCH THE BUTTON LED TURN ON NOW <<<')}")
+        print()
 
         resp = conn.send_command(f"GPIO WRITE {pin} 1")
         log("debug", f"GPIO WRITE {pin} 1", resp)
 
-        response = self.ask_user(f"Is the {description} ON?")
-        conn.send_command(f"GPIO WRITE {pin} 0")
+        time.sleep(0.5)  # Let the LED turn on
+
+        response = self.ask_user(f"Did the {description} turn ON just now? (OFF -> ON transition)")
+
+        # Restore to ON state (normal operating state)
+        conn.send_command(f"GPIO WRITE {pin} 1")
 
         if response == 'y':
             result.passed = True
-            result.detail = f"User confirmed {description} lit up"
+            result.detail = f"User confirmed {description} OFF->ON transition visible"
         elif response == 's':
             result.skipped = True
             result.detail = "Skipped by user"
         else:
-            result.detail = f"User did not see {description}"
+            result.detail = f"User did not see {description} change"
 
     def _test_rgb_led(self, result: TestResult):
         if not self.base:
@@ -941,6 +1054,43 @@ class InteractiveTestSuite:
         if not self.remote:
             return
 
+        # GPIO Diagnostic - read all input GPIOs before testing
+        print()
+        print(c(Colors.DIM, chr(0x2500) * 68))
+        print(f"  {c(Colors.CYAN, 'GPIO DIAGNOSTIC')}")
+        print(c(Colors.DIM, chr(0x2500) * 68))
+        print(f"  Reading REMOTE input GPIOs for debugging:")
+        print()
+
+        # Read GPIO 16 (button input)
+        resp16 = self.remote.send_command("GPIO READ 16")
+        level16 = resp16.get("data", {}).get("level", -1) if resp16 else -1
+        print(f"    GPIO 16 (Button):  {c(Colors.GREEN, str(level16))}  {'(pressed)' if level16 == 0 else '(released)' if level16 == 1 else '(ERROR)'}")
+
+        # Read GPIO 4 (switch armed)
+        resp4 = self.remote.send_command("GPIO READ 4")
+        level4 = resp4.get("data", {}).get("level", -1) if resp4 else -1
+        print(f"    GPIO 4  (Arm):     {c(Colors.GREEN, str(level4))}  {'(armed)' if level4 == 0 else '(not armed)' if level4 == 1 else '(ERROR)'}")
+
+        # Read GPIO 5 (switch safe)
+        resp5 = self.remote.send_command("GPIO READ 5")
+        level5 = resp5.get("data", {}).get("level", -1) if resp5 else -1
+        print(f"    GPIO 5  (Safe):    {c(Colors.GREEN, str(level5))}  {'(safe)' if level5 == 0 else '(not safe)' if level5 == 1 else '(ERROR)'}")
+
+        print()
+
+        # Interpret switch position
+        if level4 == 0 and level5 == 1:
+            print(f"    Switch Position: {c(Colors.BOLD + Colors.YELLOW, 'ARMED')}")
+        elif level4 == 1 and level5 == 0:
+            print(f"    Switch Position: {c(Colors.BOLD + Colors.GREEN, 'SAFE')}")
+        else:
+            print(f"    Switch Position: {c(Colors.RED, 'ERROR')} (invalid combination)")
+
+        print()
+        print(c(Colors.DIM, chr(0x2500) * 68))
+        print()
+
         self.print_section_header(
             "SECTION 5: INPUT TESTS",
             "These tests require you to INTERACT with physical controls"
@@ -960,39 +1110,152 @@ class InteractiveTestSuite:
             self.print_test_result(result)
 
     def _test_button_short(self, result: TestResult):
-        print(f"         {c(Colors.INFO, chr(0x2192))} Press and release the button quickly")
+        # Clear instructions with numbered steps
+        print()
+        print(f"         {c(Colors.BOLD, 'BUTTON SHORT PRESS TEST')}")
+        print(f"         {c(Colors.DIM, '=' * 60)}")
+        print()
+        print(f"         {c(Colors.CYAN, 'This test checks if the button press is detected.')}")
+        print()
+        print(f"         {c(Colors.BOLD, 'INSTRUCTIONS:')}")
+        print(f"         {c(Colors.WHITE, '  1. Press and release the ignition button QUICKLY')}")
+        print(f"         {c(Colors.WHITE, '     (press for less than 1 second, then let go)')}")
+        print(f"         {c(Colors.WHITE, '  2. The test will automatically detect your button press')}")
+        print()
+        print(f"         {c(Colors.DIM, 'When ready, press Enter to START monitoring...')}")
+        print()
+
+        # Wait for user to acknowledge they're ready
+        if not self.wait_for_input("Start monitoring now...", timeout=50.0):
+            result.skipped = True
+            result.detail = "Timeout waiting for user to start test"
+            return
+
+        print()
+        print(f"         {c(Colors.GREEN, chr(0x2192))} {c(Colors.BOLD, 'MONITORING ACTIVE - Press the button NOW!')}")
+        print(f"         {c(Colors.DIM, '(Waiting for button press... watch for message)')}")
+        print()
 
         # Get initial queue status
         initial = self.remote.send_command("QUEUE STATUS")
         initial_count = initial.get("data", {}).get("input_event", 0) if initial else 0
 
-        if not self.wait_for_input("Press the button now...", timeout=50.0):
-            result.skipped = True
-            result.detail = "Timeout waiting for button press"
-            return
+        # Read initial GPIO level (for debugging)
+        initial_gpio = self.remote.send_command("GPIO READ 16")
+        initial_gpio_level = initial_gpio.get("data", {}).get("level", -1) if initial_gpio else -1
+        print(f"         {c(Colors.DIM, f'Initial GPIO 16 level: {initial_gpio_level} (1=released, 0=pressed)')}")
 
-        time.sleep(0.3)
+        # Monitor for button press with timeout
+        start_time = time.monotonic()
+        timeout = 10.0  # Give user 10 seconds to press button
+        button_detected = False
+        iteration = 0
 
-        # Check if input event was registered
-        after = self.remote.send_command("QUEUE STATUS")
-        after_count = after.get("data", {}).get("input_event", 0) if after else 0
+        while time.monotonic() - start_time < timeout:
+            time.sleep(0.2)
+            iteration += 1
 
-        # The queue count might have changed if an event was processed
-        # We can also try reading GPIO directly
-        gpio_resp = self.remote.send_command("GPIO READ 16")  # Button pin
+            # Check if input event was registered
+            after = self.remote.send_command("QUEUE STATUS")
+            after_count = after.get("data", {}).get("input_event", 0) if after else 0
 
-        result.passed = True
-        result.detail = "Button press registered (queue activity detected)"
+            # Also check GPIO directly for immediate feedback
+            gpio_resp = self.remote.send_command("GPIO READ 16")  # Button pin
+            gpio_level = gpio_resp.get("data", {}).get("level", -1) if gpio_resp else -1
+
+            # Debug output every 2 seconds
+            if iteration % 10 == 0:
+                print(f"         {c(Colors.DIM, f'Polling... GPIO 16 = {gpio_level}, Queue = {after_count}')}", end='\r')
+
+            # Button press detected if queue changed or GPIO reads low (active)
+            if after_count != initial_count or gpio_level == 0:
+                button_detected = True
+                print()
+                print(f"         {c(Colors.GREEN, chr(0x2713) + ' BUTTON PRESS DETECTED!')}")
+                print(f"         {c(Colors.DIM, f'GPIO level: {gpio_level}, Queue change: {after_count - initial_count}')}")
+                break
+
+        print()
+        if button_detected:
+            result.passed = True
+            result.detail = "Button press registered (queue activity detected)"
+        else:
+            result.passed = False
+            result.detail = "Button press NOT detected within 10 seconds"
 
     def _test_button_long(self, result: TestResult):
-        print(f"         {c(Colors.INFO, chr(0x2192))} Press and HOLD the button for 3 seconds")
+        # Clear instructions with numbered steps
+        print()
+        print(f"         {c(Colors.BOLD, 'BUTTON LONG PRESS TEST')}")
+        print(f"         {c(Colors.DIM, '=' * 60)}")
+        print()
+        print(f"         {c(Colors.CYAN, 'This test checks if holding the button triggers an action.')}")
+        print()
+        print(f"         {c(Colors.BOLD, 'INSTRUCTIONS:')}")
+        print(f"         {c(Colors.WHITE, '  1. Press and HOLD the ignition button for 3+ seconds')}")
+        print(f"         {c(Colors.WHITE, '  2. Watch for LED or display changes (feedback)')}")
+        print(f"         {c(Colors.WHITE, '  3. Release the button when you see feedback')}")
+        print()
+        print(f"         {c(Colors.DIM, 'When ready, press Enter to START monitoring...')}")
+        print()
 
-        if not self.wait_for_input("Hold the button now...", timeout=50.0):
+        # Wait for user to acknowledge they're ready
+        if not self.wait_for_input("Start monitoring now...", timeout=50.0):
             result.skipped = True
-            result.detail = "Timeout waiting for long press"
+            result.detail = "Timeout waiting for user to start test"
             return
 
-        response = self.ask_user("Did you see a state change or feedback?")
+        print()
+        print(f"         {c(Colors.GREEN, chr(0x2192))} {c(Colors.BOLD, 'MONITORING ACTIVE - Hold the button NOW!')}")
+        print(f"         {c(Colors.DIM, '(Monitoring for button press and state changes...)')}")
+        print()
+
+        # Get initial state
+        initial = self.remote.send_command("QUEUE STATUS")
+        initial_count = initial.get("data", {}).get("input_event", 0) if initial else 0
+
+        # Read initial GPIO level (for debugging)
+        initial_gpio = self.remote.send_command("GPIO READ 16")
+        initial_gpio_level = initial_gpio.get("data", {}).get("level", -1) if initial_gpio else -1
+        print(f"         {c(Colors.DIM, f'Initial GPIO 16 level: {initial_gpio_level} (1=released, 0=pressed)')}")
+
+        # Monitor for button press with timeout
+        start_time = time.monotonic()
+        timeout = 15.0  # Give user 15 seconds to press and hold button
+        button_detected = False
+        iteration = 0
+
+        while time.monotonic() - start_time < timeout:
+            time.sleep(0.2)
+            iteration += 1
+
+            # Check if input event was registered
+            after = self.remote.send_command("QUEUE STATUS")
+            after_count = after.get("data", {}).get("input_event", 0) if after else 0
+
+            # Debug output every 2 seconds
+            if iteration % 10 == 0:
+                gpio_debug = self.remote.send_command("GPIO READ 16")
+                gpio_debug_level = gpio_debug.get("data", {}).get("level", -1) if gpio_debug else -1
+                print(f"         {c(Colors.DIM, f'Polling... GPIO 16 = {gpio_debug_level}, Queue = {after_count}')}", end='\r')
+
+            if after_count != initial_count:
+                button_detected = True
+                print()
+                print(f"         {c(Colors.GREEN, chr(0x2713) + ' BUTTON PRESS DETECTED!')}")
+                print(f"         {c(Colors.DIM, 'Waiting for long press action (watch for feedback...)')}")
+                # Wait a bit more for the long press action
+                time.sleep(2.0)
+                break
+
+        print()
+
+        if not button_detected:
+            result.passed = False
+            result.detail = "Button press NOT detected within 15 seconds"
+            return
+
+        response = self.ask_user("Did you see a state change or LED/display feedback?")
 
         if response == 'y':
             result.passed = True
@@ -1001,7 +1264,7 @@ class InteractiveTestSuite:
             result.skipped = True
             result.detail = "Skipped by user"
         else:
-            result.detail = "No response to long press detected"
+            result.detail = "No visible feedback from long press (may be expected)"
 
     def _test_arm_switch(self, result: TestResult):
         if not self.base:
@@ -1334,7 +1597,7 @@ class InteractiveTestSuite:
 
                     # Ask user to verify LED color (only if not in automated mode)
                     if not self.quiet:
-                        response = self.ask_user(f"  Does the RGB LED match {expected_color}? [y/n/skip] ", default="skip")
+                        response = self.ask_user(f"  Does the RGB LED match {expected_color}?")
                         if response == 'y':
                             print(f"           {c(Colors.GREEN, chr(0x2713))} LED color verified")
                             passed += 1
@@ -1820,8 +2083,9 @@ Examples:
         _use_colors = False
 
     # Setup file logging
-    log_path = setup_file_logging(args.log_dir)
+    log_path, json_path = setup_file_logging(args.log_dir)
     print(f"\n{c(Colors.DIM, f'Logging to: {log_path}')}")
+    print(f"{c(Colors.DIM, f'JSON results: {json_path}')}")
 
     # Load config
     config = load_config(args.config)
@@ -1882,7 +2146,7 @@ Examples:
 
     finally:
         suite.disconnect_devices()
-        close_log_logging()  # Flush and close log file
+        close_log_logging(suite.category_stats)  # Flush and close log file with summary
 
 
 if __name__ == "__main__":

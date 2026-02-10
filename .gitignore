@@ -28,3 +28,10 @@ managed_components/
 # Python
 __pycache__/
 *.pyc
+
+# Test results (large JSON files, temporary)
+scripts/test_results/
+test_results/
+
+# Local configuration (hardware ports, local settings)
+hardware_test_config.local.json

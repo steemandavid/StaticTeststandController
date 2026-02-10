@@ -12,7 +12,7 @@
 
 | Component | GPIO | Notes |
 |-----------|------|-------|
-| AS1256 ADC (SPI) | MOSI:35, SCLK:36, MISO:37, CS:39, RST:38, DRDY:40 | 24-bit ADC |
+| ADS1256 ADC (SPI) | MOSI:35, SCLK:36, MISO:37, CS:39, RST:38, DRDY:40 | 24-bit ADC |
 | SD Card (SPI) | MOSI:11, CLK:12, MISO:13, CS:10 | FAT32 formatted |
 | DS1307 RTC (I2C) | SDA:8, SCL:9 | DS:3 | CR2032 backup battery |
 | Igniter FET | GPIO 41 (control), GPIO 4 (power) | 19V, 2A max |

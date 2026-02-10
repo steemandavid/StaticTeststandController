@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Button LED GPIO Configuration** - Fixed button LED (GPIO 17) not being configured as output
+  - Added gpio_config() call to button_led_init()
+  - Button LED now properly toggles on/off during tests
+  - Fixes issue where button LED test always showed as ON
+
+- **Test Script GPIO READ Bug** - Fixed test script not sending TEST prefix for GPIO commands
+  - Removed incorrect condition that skipped "TEST " prefix for GPIO commands
+  - All GPIO READ/WRITE commands now properly prefixed with "TEST "
+  - Fixes issue where GPIO diagnostic showed -1 (ERROR) for all pins
+
+- **Interactive Test Script Improvements** - Enhanced test clarity and user experience
+  - Button press tests now show clear two-step process: "Press Enter to START" → "Press button NOW"
+  - Button LED test uses OFF→ON blink sequence for clear visibility
+  - Added GPIO diagnostic section showing real-time pin states
+  - Added polling debug output during button tests
+  - Fixed ask_user() invalid parameter bug
+
+### Added
+- **JSON Test Results Output** - Both test scripts now output detailed JSON results
+  - `interactive_test.py`: Creates `test_results/test_run_YYYYMMDD_HHMMSS.json`
+  - `diagnostic.py`: Creates `test_results/diagnostic_YYYYMMDD_HHMMSS.json`
+  - Each test result includes timestamp, duration, full device response
+  - Final summary includes totals, category breakdown, success rate
+  - Enables automated analysis and learning from test runs
+
+### Changed
+- Test results are now saved to both `.log` and `.json` files
+- Test script displays file paths at completion for easy access
+
+## [1.0.54] - 2026-02-10
+
+### Fixed
 - **State Transition Testing** - Fixed state transitions failing during automated tests
   - Added test mode flag to prevent automatic HALT transitions during testing
   - State machine now continuously drains events when in test mode
