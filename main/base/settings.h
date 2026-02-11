@@ -23,8 +23,9 @@ typedef struct {
     uint8_t end_test_delay;
 } settings_t;
 
-/* API - to be implemented */
+/* API */
 esp_err_t settings_load(const char *filepath, settings_t *settings);
 const settings_t *settings_get(void);
+void settings_print(void);
 
 #endif /* SETTINGS_H */

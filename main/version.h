@@ -9,8 +9,8 @@
 #define VERSION_H
 
 #define VERSION_MAJOR   1
-#define VERSION_MINOR   1
-#define BUILD_NUMBER    125
+#define VERSION_MINOR   2
+#define BUILD_NUMBER    0
 
 /* Version string macros */
 #define STRINGIFY(x) #x

@@ -16,6 +16,9 @@
 #include "ping_monitor.h"
 #include "safety.h"
 #include "test_protocol.h"
+#include "adc_as1256.h"
+#include "sd_logger.h"
+#include "settings.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -83,6 +86,46 @@ void base_main(void)
     /* Initialize state machine */
     state_machine_init();
 
+    /* Phase 2: Initialize SD card logger */
+    ret = sd_logger_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "SD card not available, continuing without logging");
+    }
+
+    /* Phase 2: Load settings from SD card */
+    if (ret == ESP_OK) {
+        settings_t settings;
+        ret = settings_load(NULL, &settings);
+        if (ret == ESP_OK) {
+            settings_print();
+
+            /* Apply settings to ADC */
+            adc_as1256_set_port_loadcell(settings.adc_port_loadcell);
+            adc_as1256_set_port_pressure(settings.adc_port_pressure);
+            adc_as1256_set_port_igniter(settings.adc_port_igniter_sense);
+            for (int i = 0; i < 4; i++) {
+                adc_as1256_set_port_breakwire(i, settings.adc_port_breakwire[i]);
+            }
+
+            adc_as1256_set_cal_loadcell(settings.adc_cal_loadcell);
+            adc_as1256_set_cal_pressure(settings.adc_cal_pressure);
+            adc_as1256_set_cal_igniter(settings.adc_cal_igniter);
+            for (int i = 0; i < 4; i++) {
+                adc_as1256_set_cal_breakwire(i, settings.adc_cal_breakwire[i]);
+            }
+        } else {
+            ESP_LOGW(TAG, "Settings not loaded, using defaults");
+        }
+    }
+
+    /* Phase 2: Initialize AS1256 ADC */
+    ret = adc_as1256_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ADC initialization failed, some features unavailable");
+    } else {
+        ESP_LOGI(TAG, "AS1256 ADC initialized successfully");
+    }
+
     ESP_LOGI(TAG, "Creating FreeRTOS tasks");
 
     /* Watchdog - highest priority */
@@ -118,6 +161,16 @@ void base_main(void)
     xTaskCreate(ping_monitor_task, "ping_mon",
                 STACK_SIZE_DEFAULT, NULL,
                 TASK_PRIORITY_PING_MONITOR, NULL);
+
+    /* Phase 2: ADC sampling task (high priority) */
+    xTaskCreate(adc_sampling_task, "adc_sampling",
+                STACK_SIZE_ADC, NULL,
+                TASK_PRIORITY_ADC_SAMPLING, NULL);
+
+    /* Phase 2: SD logging task */
+    xTaskCreate(sd_logging_task, "sd_logging",
+                STACK_SIZE_SD_LOGGING, NULL,
+                TASK_PRIORITY_SD_LOGGING, NULL);
 
     /* Serial test protocol (automated testing interface) */
     ESP_ERROR_CHECK(test_protocol_init());

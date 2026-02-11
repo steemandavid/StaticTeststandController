@@ -5,6 +5,55 @@ All notable changes to the Static Test Stand Controller firmware will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-11
+
+### Added - Phase 2: ADC + SD Card Logging
+- **AS1256 ADC Driver** - Complete 24-bit ADC implementation (539 lines)
+  - SPI communication with ADS1256/AS1256 via SPI2_HOST (GPIO 35-40)
+  - 8-channel single-ended input reading at up to 1000 Hz
+  - DRDY interrupt handling for efficient data ready signaling
+  - Configurable data rate (5-30000 SPS)
+  - Self-calibration on startup
+  - Per-channel calibration value support
+  - Configurable port assignments
+  - High-speed sampling FreeRTOS task (1000 Hz default)
+
+- **SD Card Logger** - Complete FAT32 SD card logging (318 lines)
+  - SD card mounting via SPI (GPIO 10-13)
+  - CSV file generation with headers
+  - Timestamped file naming (TEST_YYYYMMDD_HHMMSS.csv)
+  - 1000 Hz write capability with buffering
+  - Test summary generation (duration, max thrust, impulse, max pressure)
+  - Sample count tracking
+  - Periodic flushing every 100 samples for data safety
+  - Mutex-protected access for thread safety
+
+- **Settings Parser** - Complete settings.txt file parser (326 lines)
+  - Parse settings from SD card root directory
+  - Key-value pair format: `KEY VALUE # comment`
+  - Comment support (# and // styles)
+  - Comprehensive validation of all settings
+  - Default values for missing settings
+  - Graceful handling of missing/corrupt files (continue with defaults)
+
+- **BASE Main Integration** - Phase 2 components integrated
+  - SD card initialization with graceful degradation
+  - Settings loading with automatic application to ADC
+  - ADC initialization with DRDY interrupt
+  - ADC sampling task creation (Priority 7)
+  - SD logging task creation (Priority 6)
+
+### Changed
+- Version bumped to 1.2.0 for Phase 2 feature release
+- Documentation updated (TODO.md, IMPLEMENTATION_STATUS.md)
+- GPIO map updated to show Phase 2 pins as implemented
+
+### Technical Notes
+- ADC and SD card share SPI2_HOST but use different chip select pins
+- DRDY semaphore used for efficient interrupt-driven sampling
+- Settings provide default values if SD card not present
+- All Phase 2 features gracefully degrade if hardware not available
+
 ## [Unreleased]
 
 ### Fixed

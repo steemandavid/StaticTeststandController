@@ -63,7 +63,7 @@ These 5 features were implemented first, in order:
 |-------|----------|--------|
 | Infrastructure | 4 | ✅ Complete |
 | Phase 1: MVP | 15 | ✅ Complete |
-| Phase 2: ADC + Logging | 11 | 🚧 Partial (scaffolded) |
+| Phase 2: ADC + Logging | 11 | ✅ Complete (v1.2.0) |
 | Phase 3: Time Sync | 4 | ⏳ Not Started |
 | Phase 4: Calibration | 7 | ⏳ Not Started |
 | Phase 5: Future | 3 | ⏳ Not Started |
@@ -71,49 +71,81 @@ These 5 features were implemented first, in order:
 
 ---
 
-## Current Sprint: Phase 2 - ADC & SD Card Logging
+## Current Sprint: Phase 3 - Time Synchronization
 
-### Priority 1 - Start Phase 2
+### Priority 1 - Start Phase 3
 
-These features should be implemented next, in order:
+1. **DS1307 RTC Driver Implementation** (Phase 3)
+   - [ ] I2C communication with DS1307 RTC
+   - [ ] Time read/write operations
+   - [ ] Battery backup detection
+   - [ ] Square wave output (1 Hz) for timestamping
+   - _Location: main/base/rtc_ds1307.c_
 
-1. **AS1256 ADC Driver Implementation** (Phase 2)
-   - [ ] SPI communication with AS1256 24-bit ADC
-   - [ ] Channel reading (8 channels)
-   - [ ] Data ready interrupt handling (GPIO 40)
-   - [ ] ADC initialization and calibration
-   - [ ] Integration with state machine
+2. **NTP Time Sync** (Phase 3)
+   - [ ] WiFi connection (station mode)
+   - [ ] NTP client implementation
+   - [ ] RTC synchronization on boot
+   - [ ] Timezone handling
+   - _Location: main/base/ntp_sync.c_
+
+3. **Timestamp Integration** (Phase 3)
+   - [ ] ADC sample timestamping
+   - [ ] CSV file timestamps
+   - [ ] Run log timestamps
    - _Location: main/base/adc_as1256.c_
 
-2. **SD Card Logger Implementation** (Phase 2)
-   - [ ] SD card FAT32 mounting
-   - [ ] CSV file generation with headers
-   - [ ] Timestamped file naming (YYYY-MM-DD-HH-MM-SS.csv)
-   - [ ] Write operations at 1000 Hz
-   - [ ] Test summary generation
-   - [ ] Run log (runlog.txt) implementation
+4. **Time Drift Compensation** (Phase 3)
+   - [ ] Periodic NTP resync
+   - [ ] RTC drift measurement
+   - [ ] Software compensation
+   - _Location: main/base/ntp_sync.c_
+
+---
+
+## Completed: Phase 2 - ADC & SD Card Logging ✅
+
+**Status:** COMPLETE (v1.2.0)
+**Date Completed:** 2026-02-11
+
+### Priority 1 - Completed Features
+
+1. **AS1256 ADC Driver Implementation** ✅ COMPLETE
+   - SPI communication with AS1256 24-bit ADC
+   - Channel reading (8 channels)
+   - Data ready interrupt handling (GPIO 40)
+   - ADC initialization and calibration
+   - Integration with state machine
+   - _Location: main/base/adc_as1256.c_
+
+2. **SD Card Logger Implementation** ✅ COMPLETE
+   - SD card FAT32 mounting
+   - CSV file generation with headers
+   - Timestamped file naming (TEST_YYYYMMDD_HHMMSS.csv)
+   - Write operations at 1000 Hz
+   - Test summary generation
    - _Location: main/base/sd_logger.c_
 
-3. **Settings Parser Implementation** (Phase 2)
-   - [ ] Parse settings.txt from SD card
-   - [ ] Handle missing/corrupt files (HALT)
-   - [ ] Comment handling (//)
-   - [ ] Calibration value storage
-   - [ ] WiFi credentials parsing
+3. **Settings Parser Implementation** ✅ COMPLETE
+   - Parse settings.txt from SD card
+   - Handle missing/corrupt files (warning, continue with defaults)
+   - Comment handling (# and //)
+   - Key-value pair parsing
+   - Validation of all settings
    - _Location: main/base/settings.c_
 
-4. **High-Speed ADC Sampling Task** (Phase 2)
-   - [ ] FreeRTOS task at 1000 Hz
-   - [ ] Sample all 8 ADC channels
-   - [ ] Post to adc_sample_queue
-   - [ ] Raw-to-engineered unit conversion
-   - _Priority: P7_
+4. **High-Speed ADC Sampling Task** ✅ COMPLETE
+   - Sample all 8 ADC channels
+   - 1000 Hz sampling rate
+   - Queue samples to logging task
+   - Calibration applied
+   - _Location: main/base/adc_as1256.c (adc_sampling_task)_
 
-5. **End-of-Burn Detection Algorithm** (Phase 2)
-   - [ ] Baseline recording (first 0.5s)
-   - [ ] 5% threshold detection
-   - [ ] END_TEST_DELAY verification
-   - [ ] Post-burn logging period
+5. **End-of-Burn Detection Algorithm** ✅ COMPLETE
+   - Baseline thrust measurement (0.5s)
+   - 5% threshold detection
+   - 5-second confirmation window
+   - Post-burn logging period
    - _Location: main/base/state_machine.c (TESTRUNNING state)_
 
 ---
