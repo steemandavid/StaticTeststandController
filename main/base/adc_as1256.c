@@ -78,6 +78,9 @@ static const char *TAG = "adc_ads1256";
 #define ADS_DRATE_10      0x10  /* 10 SPS */
 #define ADS_DRATE_5       0x00  /* 5 SPS */
 
+/* Default sample rate (reduced from 1000 Hz for stability) */
+#define ADS_DRATE_DEFAULT ADS_DRATE_100
+
 /* ADCON register bits */
 #define ADS_ADCON_CLKOUT  0x00  /* Clock out enabled */
 #define ADS_ADCON_CD_OFF  0x02  /* Sensor detect off */
@@ -347,7 +350,7 @@ esp_err_t adc_as1256_init(void)
         return ret;
     }
 
-    ret = ads_write_reg(ADS_REG_DRATE, ADS_DRATE_1000);  /* 1000 SPS default */
+    ret = ads_write_reg(ADS_REG_DRATE, ADS_DRATE_DEFAULT);  /* 100 SPS default */
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set DRATE register");
         return ret;
@@ -481,7 +484,7 @@ void adc_sampling_task(void *pvParameters)
         }
 
         /* Delay to maintain target sample rate */
-        vTaskDelay(pdMS_TO_TICKS(1));  /* 1ms = 1000 Hz */
+        vTaskDelay(pdMS_TO_TICKS(10));  /* 10ms = 100 Hz */
     }
 }
 

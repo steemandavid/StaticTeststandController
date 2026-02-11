@@ -1,0 +1,38 @@
+Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=/home/john/.espressif/python_env/idf5.5_py3.12_env/bin/python -DESP_PLATFORM=1 -DCCACHE_ENABLE=0 /home/john/automaker/Static Test Stand Controller
+CMake Error at /home/john/esp/esp-idf/tools/cmake/component.cmake:229 (message):
+  CMake Warning (dev) at build_properties.temp.cmake:8:
+
+    Syntax Warning in cmake code at column 106
+
+  
+
+    Argument not separated from preceding token by whitespace.
+
+  Call Stack (most recent call first):
+
+    /home/john/esp/esp-idf/tools/cmake/scripts/component_get_requirements.cmake:3 (include)
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+
+
+  CMake Error at /home/john/automaker/Static Test Stand
+  Controller/main/CMakeLists.txt:32 (add_compile_definitions):
+
+    Unknown CMake command "add_compile_definitions".
+
+  Call Stack (most recent call first):
+
+    /home/john/esp/esp-idf/tools/cmake/scripts/component_get_requirements.cmake:107 (include)
+    /home/john/esp/esp-idf/tools/cmake/scripts/component_get_requirements.cmake:160 (__component_get_requirements)
+
+  
+
+
+
+Call Stack (most recent call first):
+  /home/john/esp/esp-idf/tools/cmake/build.cmake:664 (__component_get_requirements)
+  /home/john/esp/esp-idf/tools/cmake/project.cmake:740 (idf_build_process)
+  CMakeLists.txt:34 (project)
+
+

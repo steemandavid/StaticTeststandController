@@ -1,0 +1,94 @@
+# Static Test Stand Controller - Settings File
+#
+# This is an example settings file for the BASE unit.
+# Copy this file to the root of your SD card and rename it to "settings.txt"
+#
+# Lines starting with # are comments
+# Format: KEY VALUE
+#
+# For more information, see the Functional Specification Document (FSD)
+
+# ============================================================================
+# Igniter Settings
+# ============================================================================
+
+# How long (in seconds) to keep the igniter activated during a test
+# Range: 0.1 - 10.0 seconds
+IGNITER_ON_TIME 0.5
+
+# ============================================================================
+# ADC Port Assignments (0-7)
+# Maps physical sensors to ADS1256 ADC input channels
+# ============================================================================
+
+# Load cell (thrust measurement)
+ADC_PORT_LOADCELL 0
+
+# Pressure transducer (chamber pressure)
+ADC_PORT_PRESSURE 1
+
+# Igniter sense (continuity/current sensing)
+ADC_PORT_IGNITER_SENSE 2
+
+# Break wires (safety interlocks)
+# Four breakwire inputs for detecting grain burner burn-through
+ADC_PORT_BREAKWIRE 3 4 5 6
+
+# ============================================================================
+# WiFi Settings (for Phase 3 NTP time sync)
+# ============================================================================
+
+WIFI_SSID YourWiFiSSID
+WIFI_PASSWORD YourWiFiPassword
+
+# ============================================================================
+# ADC Configuration
+# ============================================================================
+
+# Sample rate in Hz (10 - 10000 Hz)
+# Lower rate = less CPU usage, higher rate = more data points
+# Default: 100 Hz (reduced from 1000 Hz for stability)
+ADC_SAMPLE_RATE 100
+
+# ============================================================================
+# ADC Calibration Values
+# These should be calibrated for your specific sensors
+# ============================================================================
+
+# Load cell calibration (raw counts to kg conversion factor)
+# Calibrate by applying known weight and measuring raw ADC counts
+ADC_CAL_LOADCELL 1.0
+
+# Pressure transducer calibration (raw counts to bar conversion factor)
+# Calibrate with known pressure source
+ADC_CAL_PRESSURE 1.0
+
+# Igniter sense calibration (raw counts to volts conversion factor)
+# Measures voltage across sense resistor
+ADC_CAL_IGNITER 1.0
+
+# Breakwire calibration (raw counts to volts conversion factor)
+# All four breakwires
+ADC_CAL_BREAKWIRE 1.0 1.0 1.0 1.0
+
+# ============================================================================
+# Communication Timeouts (seconds)
+# ============================================================================
+
+# Time before warning about poor communication
+COMMS_WARNING_TIMEOUT 5
+
+# Time before entering HALT due to communication failure
+COMMS_ERROR_TIMEOUT 10
+
+# ============================================================================
+# Test Configuration
+# ============================================================================
+
+# How long (in seconds) to continue logging after burn ends
+# This captures the cooldown period data
+END_TEST_DELAY 5
+
+# ============================================================================
+# END OF SETTINGS FILE
+# ============================================================================

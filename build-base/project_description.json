@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "StaticTeststandController",
-    "project_version":    "a0ec146-dirty",
+    "project_version":    "0d4038d-dirty",
     "project_path":       "/home/john/automaker/Static Test Stand Controller",
     "idf_path":           "/home/john/esp/esp-idf",
     "build_dir":          "/home/john/automaker/Static Test Stand Controller/build-base",

@@ -27,47 +27,47 @@ Flash will be erased from 0x00008000 to 0x00008fff...
 SHA digest in image updated
 Compressed 22496 bytes to 14267...
 Writing at 0x00000000... (100 %)
-Wrote 22496 bytes (14267 compressed) at 0x00000000 in 0.5 seconds (effective 358.5 kbit/s)...
+Wrote 22496 bytes (14267 compressed) at 0x00000000 in 0.5 seconds (effective 356.8 kbit/s)...
 Hash of data verified.
-Compressed 867104 bytes to 533922...
+Compressed 867104 bytes to 533923...
 Writing at 0x00010000... (3 %)
-Writing at 0x0001d26f... (6 %)
-Writing at 0x00027bba... (9 %)
-Writing at 0x0003279a... (12 %)
-Writing at 0x0003b9c8... (15 %)
-Writing at 0x00041977... (18 %)
-Writing at 0x00047c7b... (21 %)
-Writing at 0x0004e1c5... (24 %)
-Writing at 0x00054605... (27 %)
-Writing at 0x0005a841... (30 %)
-Writing at 0x00060970... (33 %)
-Writing at 0x000668c4... (36 %)
-Writing at 0x0006bddd... (39 %)
-Writing at 0x00070fe6... (42 %)
-Writing at 0x00076000... (45 %)
-Writing at 0x0007bba1... (48 %)
-Writing at 0x00080ff2... (51 %)
-Writing at 0x0008676d... (54 %)
-Writing at 0x0008bf7a... (57 %)
-Writing at 0x00091ee4... (60 %)
-Writing at 0x000978b4... (63 %)
-Writing at 0x0009d56a... (66 %)
-Writing at 0x000a3116... (69 %)
-Writing at 0x000a8af1... (72 %)
-Writing at 0x000ae90b... (75 %)
+Writing at 0x0001d263... (6 %)
+Writing at 0x00027bb7... (9 %)
+Writing at 0x00032793... (12 %)
+Writing at 0x0003b9c5... (15 %)
+Writing at 0x00041974... (18 %)
+Writing at 0x00047c78... (21 %)
+Writing at 0x0004e1b6... (24 %)
+Writing at 0x00054603... (27 %)
+Writing at 0x0005a840... (30 %)
+Writing at 0x0006096e... (33 %)
+Writing at 0x000668c1... (36 %)
+Writing at 0x0006bdda... (39 %)
+Writing at 0x00070fe4... (42 %)
+Writing at 0x00075ffd... (45 %)
+Writing at 0x0007bb9e... (48 %)
+Writing at 0x00080ff0... (51 %)
+Writing at 0x0008676b... (54 %)
+Writing at 0x0008bf78... (57 %)
+Writing at 0x00091ee3... (60 %)
+Writing at 0x000978b3... (63 %)
+Writing at 0x0009d569... (66 %)
+Writing at 0x000a3114... (69 %)
+Writing at 0x000a8aed... (72 %)
+Writing at 0x000ae909... (75 %)
 Writing at 0x000b42cd... (78 %)
-Writing at 0x000b96ce... (81 %)
-Writing at 0x000c2a63... (84 %)
-Writing at 0x000c8836... (87 %)
-Writing at 0x000ce174... (90 %)
-Writing at 0x000d45a8... (93 %)
-Writing at 0x000dae97... (96 %)
+Writing at 0x000b96cc... (81 %)
+Writing at 0x000c2a61... (84 %)
+Writing at 0x000c8834... (87 %)
+Writing at 0x000ce172... (90 %)
+Writing at 0x000d45a7... (93 %)
+Writing at 0x000dae96... (96 %)
 Writing at 0x000dff56... (100 %)
-Wrote 867104 bytes (533922 compressed) at 0x00010000 in 12.2 seconds (effective 569.8 kbit/s)...
+Wrote 867104 bytes (533923 compressed) at 0x00010000 in 12.2 seconds (effective 569.2 kbit/s)...
 Hash of data verified.
 Compressed 3072 bytes to 120...
 Writing at 0x00008000... (100 %)
-Wrote 3072 bytes (120 compressed) at 0x00008000 in 0.0 seconds (effective 927.5 kbit/s)...
+Wrote 3072 bytes (120 compressed) at 0x00008000 in 0.0 seconds (effective 921.0 kbit/s)...
 Hash of data verified.
 
 Leaving...
