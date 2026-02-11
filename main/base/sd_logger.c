@@ -80,28 +80,30 @@ esp_err_t sd_logger_init(void)
     }
 
     /* Configure SD card slot */
-    sdmmc_card_t *card_ptr;
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = PIN_SD_CS;
     slot_config.host_id = SD_SPI_HOST;
 
-    /* Mount FAT filesystem */
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
+    /* Configure SPI host for SD card */
+    sdmmc_host_t host_config = SDSPI_HOST_DEFAULT();
+    host_config.slot = SD_SPI_HOST;
+    host_config.max_freq_khz = SD_SPI_FREQ / 1000;
+
+    /* Mount FAT filesystem - ESP-IDF v5.5.2 API */
+    esp_vfs_fat_mount_config_t mount_config = {
         .max_files = 5,
+        .format_if_mount_failed = false,
         .allocation_unit_size = 16 * 1024
     };
 
-    /* Handle mount point already existing */
-    esp_vfs_fat_sdcard_unmount(MOUNT_POINT, card);
-
-    ret = esp_vfs_fat_sdspi_mount(MOUNT_POINT, &mount_config, &slot_config, &card_ptr);
+    sdmmc_card_t *card_out;
+    ret = esp_vfs_fat_sdspi_mount(MOUNT_POINT, &host_config, &slot_config, &mount_config, &card_out);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    card = card_ptr;
+    card = card_out;
     sd_mounted = true;
 
     /* Print SD card information */
@@ -199,7 +201,6 @@ esp_err_t sd_logger_write_sample(const adc_sample_t *sample)
     if (sample_count % 100 == 0) {
         if (xSemaphoreTake(sd_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             fflush(current_file);
-            fsync(fileno(current_file));
             xSemaphoreGive(sd_mutex);
         }
     }
@@ -233,9 +234,8 @@ esp_err_t sd_logger_write_summary(float duration, float max_thrust,
     fprintf(current_file, "# Max Pressure, %.3f, bar\n", max_pressure);
     fprintf(current_file, "# Samples, %lu, count\n", (unsigned long)sample_count);
 
-    /* Flush and close */
+    /* Flush */
     fflush(current_file);
-    fsync(fileno(current_file));
 
     xSemaphoreGive(sd_mutex);
 
@@ -260,7 +260,6 @@ esp_err_t sd_logger_close(void)
     /* Close file if open */
     if (current_file != NULL) {
         fflush(current_file);
-        fsync(fileno(current_file));
         fclose(current_file);
         current_file = NULL;
         ESP_LOGI(TAG, "Closed file: %s", current_filename);

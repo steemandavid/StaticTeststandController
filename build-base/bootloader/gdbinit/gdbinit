@@ -1,0 +1,2 @@
+source /home/john/automaker/Static Test Stand Controller/build-base/bootloader/gdbinit/symbols
+source /home/john/automaker/Static Test Stand Controller/build-base/bootloader/gdbinit/connect

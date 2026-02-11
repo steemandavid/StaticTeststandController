@@ -1,6 +1,7 @@
 /*******************************************************************************
- * BASE Unit - AS1256 24-bit ADC SPI Driver
+ * BASE Unit - ADS1256 24-bit ADC SPI Driver
  *
+ * Texas Instruments ADS1256 24-bit Delta-Sigma ADC
  * Provides high-speed data acquisition at up to 1000 Hz.
  * See FSD Section 2.1 for pin assignments and channel map.
  ******************************************************************************/
@@ -13,15 +14,16 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
 
 /* Tag for logging */
-static const char *TAG = "adc_as1256";
+static const char *TAG = "adc_ads1256";
 
-/* AS1256 Register Definitions (ADS1256 compatible) */
+/* ADS1256 Register Definitions (Texas Instruments ADS1256) */
 #define ADS_REG_STATUS    0x00
 #define ADS_REG_MUX       0x01
 #define ADS_REG_ADCON     0x02
@@ -34,7 +36,7 @@ static const char *TAG = "adc_as1256";
 #define ADS_REG_FSC1      0x09
 #define ADS_REG_FSC2      0x0A
 
-/* AS1256 Command Definitions */
+/* ADS1256 Command Definitions */
 #define ADS_CMD_WAKEUP    0x00
 #define ADS_CMD_RDATA     0x01  /* Read data */
 #define ADS_CMD_RDATAC    0x03  /* Read data continuous */
@@ -238,7 +240,7 @@ esp_err_t adc_as1256_init(void)
 {
     esp_err_t ret;
 
-    ESP_LOGI(TAG, "Initializing AS1256 ADC...");
+    ESP_LOGI(TAG, "Initializing ADS1256 ADC...");
 
     /* Create DRDY semaphore */
     drdy_sem = xSemaphoreCreateBinary();
@@ -365,7 +367,7 @@ esp_err_t adc_as1256_init(void)
     /* Wait for DRDY to indicate ready */
     ret = ads_wait_for_drdy(pdMS_TO_TICKS(100));
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "AS1256 not responding after init");
+        ESP_LOGE(TAG, "ADS1256 not responding after init");
         return ret;
     }
 
@@ -386,7 +388,7 @@ esp_err_t adc_as1256_init(void)
     }
 
     adc_initialized = true;
-    ESP_LOGI(TAG, "AS1256 ADC initialized successfully");
+    ESP_LOGI(TAG, "ADS1256 ADC initialized successfully");
     return ESP_OK;
 }
 

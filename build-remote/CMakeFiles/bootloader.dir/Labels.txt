@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/home/john/automaker/Static Test Stand Controller/build-remote/CMakeFiles/bootloader
+/home/john/automaker/Static Test Stand Controller/build-remote/CMakeFiles/bootloader.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/CMakeFiles/bootloader-complete.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/home/john/automaker/Static Test Stand Controller/build-remote/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
