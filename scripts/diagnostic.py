@@ -171,7 +171,7 @@ def main():
     print("="*60)
 
     # Create results directory
-    results_dir = "scripts/test_results"
+    results_dir = "test_results"
     os.makedirs(results_dir, exist_ok=True)
 
     # Initialize results structure

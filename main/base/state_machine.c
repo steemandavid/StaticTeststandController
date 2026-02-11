@@ -163,7 +163,7 @@ static void handle_halt_enter(void)
     ESP_LOGW(TAG, "Entering HALT state");
     safety_enter_safe_state();
     rgb_led_set(255, 0, 0, LED_PATTERN_PULSE_HALF_HZ);
-    buzzer_play(BUZZER_PATTERN_ALARM);
+    buzzer_play(BUZZER_PATTERN_LONG_BEEP);  /* Single long beep to indicate HALT, then silent */
 }
 
 static void handle_halt_run(void)
@@ -174,6 +174,34 @@ static void handle_halt_run(void)
 static void handle_halt_exit(void)
 {
     buzzer_stop();
+}
+
+/* CHECK_IGNITER - Pre-flight igniter check */
+static void handle_chk_ign_enter(void)
+{
+    ESP_LOGI(TAG, "Entering CHK_IGN state");
+    rgb_led_set(255, 0, 255, LED_PATTERN_PULSE_HALF_HZ);  /* Magenta pulsing */
+}
+
+/* CHECK_BREAKWIRES - Pre-flight breakwire check */
+static void handle_chk_brk_enter(void)
+{
+    ESP_LOGI(TAG, "Entering CHK_BRK state");
+    rgb_led_set(255, 0, 255, LED_PATTERN_PULSE_HALF_HZ);  /* Magenta pulsing */
+}
+
+/* CALIBRATE_LOADCELL - Load cell calibration mode */
+static void handle_cal_lc_enter(void)
+{
+    ESP_LOGI(TAG, "Entering CAL_LC state");
+    rgb_led_set(255, 255, 0, LED_PATTERN_PULSE_HALF_HZ);  /* Yellow pulsing */
+}
+
+/* CALIBRATE_PRESSURE - Pressure calibration mode */
+static void handle_cal_pr_enter(void)
+{
+    ESP_LOGI(TAG, "Entering CAL_PR state");
+    rgb_led_set(255, 255, 0, LED_PATTERN_PULSE_HALF_HZ);  /* Yellow pulsing */
 }
 
 /* WELCOME_SCREEN */
@@ -217,10 +245,10 @@ static const state_handlers_t s_handlers[STATE_MAX] = {
     [STATE_TESTRUNNING]         = { handler_stub,            handle_generic_run, handler_stub },
     [STATE_ENDTEST]             = { handler_stub,            handle_generic_run, handler_stub },
     [STATE_HALT]                = { handle_halt_enter,       handle_halt_run,     handle_halt_exit },
-    [STATE_CHECK_IGNITER]       = { handler_stub,            handle_generic_run, handler_stub },
-    [STATE_CHECK_BREAKWIRES]    = { handler_stub,            handle_generic_run, handler_stub },
-    [STATE_CALIBRATE_LOADCELL]  = { handler_stub,            handle_generic_run, handler_stub },
-    [STATE_CALIBRATE_PRESSURE]  = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_CHECK_IGNITER]       = { handle_chk_ign_enter,    handle_generic_run, handler_stub },
+    [STATE_CHECK_BREAKWIRES]    = { handle_chk_brk_enter,    handle_generic_run, handler_stub },
+    [STATE_CALIBRATE_LOADCELL]  = { handle_cal_lc_enter,     handle_generic_run, handler_stub },
+    [STATE_CALIBRATE_PRESSURE]  = { handle_cal_pr_enter,     handle_generic_run, handler_stub },
     [STATE_WELCOME_SCREEN]      = { handle_welcome_enter,    handle_welcome_run,  handler_stub },
 };
 

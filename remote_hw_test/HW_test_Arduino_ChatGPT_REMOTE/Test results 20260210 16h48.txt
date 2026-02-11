@@ -1,0 +1,70 @@
+
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x116c
+load:0x403c8700,len:0xc2c
+load:0x403cb700,len:0x3108
+entry 0x403c88b8
+
+ESP32-S3 Peripheral Interactive Tester
+Follow prompts in Serial Monitor.
+Set Serial Monitor to: 115200 baud, Newline (or Both NL/CR).
+
+Press ENTER to start the tests (press ENTER)
+
+[I2C] Scanning bus...
+  Found device at 0x3C
+  I2C scan complete. Using OLED address 0x3C
+
+[OLED] Initializing SSD1306...
+  Do you see readable text on the OLED? [y/n]: 
+[IGNITION] Testing button GPIO16 and LED GPIO17...
+  Blinking button LED (GPIO17) 6 times (slower)...
+  Did the button LED blink? [y/n]:   Now testing button input (GPIO16).
+  Press and release the ignition button 3 times within 10 seconds.
+    Detected press 1/3
+    Detected press 2/3
+    Detected press 3/3
+
+[ARM/SAFE] Testing toggle switch inputs:
+  GPIO4 = ARMED (active LOW)
+  GPIO5 = SAFE  (active LOW)
+  Flip switch to SAFE position, then press ENTER.
+  Ready? (press ENTER)
+  Reads: SAFE=0, ARMED=1 (LOW=active)
+  Now flip switch to ARMED position, then press ENTER.
+  Ready? (press ENTER)
+  Reads: SAFE=1, ARMED=0 (LOW=active)
+
+[BATTERY] Testing ADC on GPIO6...
+  Make sure the battery is connected to the divider, and ADC node is on GPIO6.
+  ADC avg counts: 1866.4 / 4095
+  Estimated ADC pin voltage: 1.504 V
+  Estimated battery voltage (using divider): 3.01 V
+  (If the estimate is off, adjust R_TOP_OHMS / R_BOTTOM_OHMS in the sketch.)
+  Does the battery reading look plausible (non-zero and roughly what you expect)? [y/n]: 
+[WS2812] Testing RGB LED on GPIO48...
+  Cycling colors slowly: Red -> Green -> Blue -> White -> Off (repeat 2x).
+  Did the WS2812 show the expected (slow) color sequence? [y/n]: 
+[BUZZER] Testing buzzer on GPIO42...
+  Wiring assumed: Buzzer+ to 3.3V, Buzzer- to GPIO42 (sink mode).
+  Expect: 3 beeps, then SILENCE.
+  Playing 3 tones: 800 Hz, 1200 Hz, 1600 Hz.
+  Did you hear the 3 beeps, and did it go silent afterwards? [y/n]: 
+==================== TEST SUMMARY ====================
+I2C scan:        PASS
+OLED address:    0x3C
+OLED display:    PASS
+Ignition LED:    PASS
+Ignition button: PASS (detected presses: 3)
+Arm/Safe switch: PASS
+Battery ADC:     PASS (Vadc=1.504 V, Vbatt~3.01 V)
+WS2812 RGB:      PASS
+Buzzer:          PASS
+======================================================
+OVERALL: PASS ✅
+
+Done. Reset board to run again.

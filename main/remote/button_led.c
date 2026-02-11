@@ -23,7 +23,7 @@ static volatile bool s_led_state = false;
 static void blink_timer_cb(void *arg)
 {
     s_led_state = !s_led_state;
-    gpio_set_level(PIN_LED_BUTTON, s_led_state ? 1 : 0);
+    gpio_set_level(PIN_LED_BUTTON, s_led_state ? 0 : 1);  /* active-LOW: ON=0, OFF=1 */
 }
 
 esp_err_t button_led_init(void)
@@ -38,8 +38,8 @@ esp_err_t button_led_init(void)
     };
     gpio_config(&led_cfg);
 
-    /* Start with LED OFF */
-    gpio_set_level(PIN_LED_BUTTON, 0);
+    /* Start with LED OFF (hardware is active-LOW, so OFF = GPIO HIGH) */
+    gpio_set_level(PIN_LED_BUTTON, 1);
 
     esp_timer_create_args_t timer_args = {
         .callback = blink_timer_cb,
@@ -52,7 +52,7 @@ esp_err_t button_led_init(void)
         return ret;
     }
 
-    ESP_LOGI(TAG, "Button LED initialized on GPIO %d", PIN_LED_BUTTON);
+    ESP_LOGI(TAG, "Button LED initialized on GPIO %d (active-LOW)", PIN_LED_BUTTON);
     return ESP_OK;
 }
 
@@ -65,16 +65,16 @@ void button_led_set(button_led_mode_t mode)
 
     switch (mode) {
         case BUTTON_LED_OFF:
-            gpio_set_level(PIN_LED_BUTTON, 0);
+            gpio_set_level(PIN_LED_BUTTON, 1);  /* OFF = HIGH for active-LOW */
             break;
 
         case BUTTON_LED_SOLID:
-            gpio_set_level(PIN_LED_BUTTON, 1);
+            gpio_set_level(PIN_LED_BUTTON, 0);  /* ON = LOW for active-LOW */
             break;
 
         case BUTTON_LED_BLINK:
             s_led_state = true;
-            gpio_set_level(PIN_LED_BUTTON, 1);
+            gpio_set_level(PIN_LED_BUTTON, 0);  /* Start ON (LOW for active-LOW) */
             /* 250ms interval = 2Hz full cycle (250ms on + 250ms off) */
             esp_timer_start_periodic(s_blink_timer, 250 * 1000);  /* microseconds */
             break;

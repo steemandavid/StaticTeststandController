@@ -12,7 +12,7 @@ Usage:
     python3 interactive_test.py --category automated
     python3 interactive_test.py --verbose
 
-Log files are written to: scripts/test_results/
+Log files are written to: test_results/
 """
 
 import argparse
@@ -44,7 +44,7 @@ _json_results: list[dict] = []
 _test_run_start_time: Optional[str] = None
 
 
-def setup_file_logging(log_dir: str = "scripts/test_results") -> tuple[str, str]:
+def setup_file_logging(log_dir: str = "test_results") -> tuple[str, str]:
     """Setup file logging and return the log file path and JSON results path."""
     global _file_logger, _log_file_path, _json_results_path, _json_results, _test_run_start_time
 
@@ -813,10 +813,10 @@ class InteractiveTestSuite:
 
         # RGB/Neopixel LED tests (GPIO 47 on both units)
         if self.base:
-            tests.append(("BASE RGB LED (Neopixel)", "BASE", lambda r: self._test_neopixel_led(r, self.base)))
+            tests.append(("BASE RGB LED (Neopixel)", "BASE", lambda r: self._test_neopixel_led(r, self.base, "BASE")))
 
         if self.remote:
-            tests.append(("REMOTE RGB LED (Neopixel)", "REMOTE", lambda r: self._test_neopixel_led(r, self.remote)))
+            tests.append(("REMOTE RGB LED (Neopixel)", "REMOTE", lambda r: self._test_neopixel_led(r, self.remote, "REMOTE")))
             tests.append(("REMOTE Button LED", "REMOTE", lambda r: self._test_gpio_led(r, self.remote, 17, "button LED")))
 
         # RGB LED state color test
@@ -836,10 +836,10 @@ class InteractiveTestSuite:
             result = self.run_test(name, target, test_fn, "LEDs")
             self.print_test_result(result)
 
-    def _test_neopixel_led(self, result: TestResult, conn: SerialConnection):
+    def _test_neopixel_led(self, result: TestResult, conn: SerialConnection, unit_name: str):
         """Test the Neopixel RGB LED on GPIO 48."""
-        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to bright RED...")
-        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting {c(Colors.BOLD, unit_name)} RGB LED to bright RED...")
+        print(f"         {c(Colors.BOLD, f'>>> LOOK AT THE {unit_name} RGB LED NOW <<<')}")
 
         resp = conn.send_command("LED SET 255 0 0 solid")
         result.response = resp
@@ -864,8 +864,8 @@ class InteractiveTestSuite:
             conn.send_command("LED STATE")
             return
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to bright GREEN...")
-        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting {c(Colors.BOLD, unit_name)} RGB LED to bright GREEN...")
+        print(f"         {c(Colors.BOLD, f'>>> LOOK AT THE {unit_name} RGB LED NOW <<<')}")
         conn.send_command("LED SET 0 255 0 solid")
         time.sleep(0.3)
 
@@ -880,8 +880,8 @@ class InteractiveTestSuite:
             conn.send_command("LED STATE")
             return
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} Setting LED to bright BLUE...")
-        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} Setting {c(Colors.BOLD, unit_name)} RGB LED to bright BLUE...")
+        print(f"         {c(Colors.BOLD, f'>>> LOOK AT THE {unit_name} RGB LED NOW <<<')}")
         conn.send_command("LED SET 0 0 255 solid")
         time.sleep(0.3)
 
@@ -918,6 +918,14 @@ class InteractiveTestSuite:
         print(f"         {c(Colors.DIM, 'Looking at the button LED...')}")
         print()
 
+        # Wait for user to acknowledge they're ready
+        if not self.wait_for_input("Ready to start test? Press Enter to begin...", timeout=30.0):
+            result.skipped = True
+            result.detail = "Timeout waiting for user to start test"
+            return
+
+        print()
+
         # First, turn OFF explicitly to create a visible change
         print(f"         {c(Colors.INFO, chr(0x2192))} Turning {c(Colors.BOLD, description)} OFF (GPIO {pin})...")
         resp = conn.send_command(f"GPIO WRITE {pin} 0")
@@ -932,7 +940,7 @@ class InteractiveTestSuite:
         resp = conn.send_command(f"GPIO WRITE {pin} 1")
         log("debug", f"GPIO WRITE {pin} 1", resp)
 
-        time.sleep(0.5)  # Let the LED turn on
+        time.sleep(2.0)  # Let the LED turn on for 2 seconds (user can see it clearly)
 
         response = self.ask_user(f"Did the {description} turn ON just now? (OFF -> ON transition)")
 
@@ -977,9 +985,9 @@ class InteractiveTestSuite:
 
         print(f"\n         {c(Colors.BOLD, 'RGB LED STATE TEST')}")
         print(f"         {c(Colors.INFO, chr(0x2192))} Current state: {c(Colors.BOLD, state_name)}")
-        print(f"         {c(Colors.INFO, chr(0x2192))} The RGB LED should show: {c(Colors.BOLD, color_desc)}")
+        print(f"         {c(Colors.INFO, chr(0x2192))} The {c(Colors.BOLD, 'BASE')} RGB LED should show: {c(Colors.BOLD, color_desc)}")
         print(f"         {c(Colors.DIM, '(The LED was just restored to state color)')}")
-        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE RGB LED NOW <<<')}")
+        print(f"         {c(Colors.BOLD, '>>> LOOK AT THE BASE RGB LED NOW <<<')}")
 
         # Add a small delay to let the user observe the LED
         time.sleep(0.3)
@@ -1101,8 +1109,8 @@ class InteractiveTestSuite:
             ("Button Long Press", "REMOTE", lambda r: self._test_button_long(r)),
         ]
 
-        if self.base:
-            tests.append(("Arm/Safe Switch", "BASE", lambda r: self._test_arm_switch(r)))
+        if self.remote:
+            tests.append(("Arm/Safe Switch", "REMOTE", lambda r: self._test_arm_switch(r)))
 
         for i, (name, target, test_fn) in enumerate(tests, 1):
             self.print_test_start(i, len(tests), name)
@@ -1233,13 +1241,16 @@ class InteractiveTestSuite:
             after = self.remote.send_command("QUEUE STATUS")
             after_count = after.get("data", {}).get("input_event", 0) if after else 0
 
+            # Also check GPIO level directly (more reliable)
+            gpio_check = self.remote.send_command("GPIO READ 16")
+            gpio_level = gpio_check.get("data", {}).get("level", -1) if gpio_check else -1
+
             # Debug output every 2 seconds
             if iteration % 10 == 0:
-                gpio_debug = self.remote.send_command("GPIO READ 16")
-                gpio_debug_level = gpio_debug.get("data", {}).get("level", -1) if gpio_debug else -1
-                print(f"         {c(Colors.DIM, f'Polling... GPIO 16 = {gpio_debug_level}, Queue = {after_count}')}", end='\r')
+                print(f"         {c(Colors.DIM, f'Polling... GPIO 16 = {gpio_level}, Queue = {after_count}')}", end='\r')
 
-            if after_count != initial_count:
+            # Detect button press by EITHER queue change OR GPIO level change
+            if after_count != initial_count or gpio_level != initial_gpio_level:
                 button_detected = True
                 print()
                 print(f"         {c(Colors.GREEN, chr(0x2713) + ' BUTTON PRESS DETECTED!')}")
@@ -1267,42 +1278,104 @@ class InteractiveTestSuite:
             result.detail = "No visible feedback from long press (may be expected)"
 
     def _test_arm_switch(self, result: TestResult):
-        if not self.base:
+        if not self.remote:
             result.skipped = True
-            result.detail = "BASE not connected"
+            result.detail = "REMOTE not connected"
             return
 
-        # Get current state
-        before = self.base.send_command("STATE")
-        before_state = before.get("data", {}).get("name", "") if before else ""
+        print()
+        print(f"         {c(Colors.BOLD, 'ARM/SAFE Switch Test')}")
+        print(f"         {c(Colors.DIM, '='*60)}")
+        print()
 
-        print(f"         {c(Colors.INFO, chr(0x2192))} Current state: {c(Colors.BOLD, before_state)}")
-        print(f"         {c(Colors.DIM, 'Toggle the ARM/SAFE switch')}")
+        # Helper to read switch state from GPIO
+        def read_switch_state():
+            # Read both GPIO pins
+            safe_gpio = self.remote.send_command("GPIO READ 5")
+            armed_gpio = self.remote.send_command("GPIO READ 4")
 
-        if not self.wait_for_input("Toggle the switch now...", timeout=50.0):
-            result.skipped = True
-            result.detail = "Timeout waiting for switch toggle"
-            return
+            safe_level = safe_gpio.get("data", {}).get("level", -1) if safe_gpio else -1
+            armed_level = armed_gpio.get("data", {}).get("level", -1) if armed_gpio else -1
 
-        time.sleep(0.5)
+            # Switch logic (from FSD):
+            # SAFE: SWITCH_SAFE=LOW (0), SWITCH_ARMED=HIGH (1)
+            # ARMED: SWITCH_SAFE=HIGH (1), SWITCH_ARMED=LOW (0)
+            # ERROR: Both LOW or both HIGH
 
-        # Get new state
-        after = self.base.send_command("STATE")
-        after_state = after.get("data", {}).get("name", "") if after else ""
-
-        if before_state != after_state:
-            result.passed = True
-            result.detail = f"State changed: {before_state} -> {after_state}"
-        else:
-            response = self.ask_user(f"State is still {after_state}. Was switch toggled?")
-            if response == 'y':
-                result.detail = f"State remained {after_state} (switch may control different transition)"
-                result.passed = True
-            elif response == 's':
-                result.skipped = True
-                result.detail = "Skipped by user"
+            if safe_level == 0 and armed_level == 1:
+                return "SAFE"
+            elif safe_level == 1 and armed_level == 0:
+                return "ARMED"
             else:
-                result.detail = f"State did not change from {before_state}"
+                return f"ERROR (safe={safe_level}, armed={armed_level})"
+
+        # Step 1: Read initial state
+        initial_state = read_switch_state()
+        print(f"         {c(Colors.INFO, 'Step 1: Initial switch state detected:')}")
+        print(f"         {c(Colors.BOLD, f'           {initial_state}')}")
+        print()
+
+        # Step 2: Ask user to put switch in SAFE
+        print(f"         {c(Colors.INFO, 'Step 2: Put the switch in SAFE position')}")
+        print(f"         {c(Colors.DIM, '           (Toggle to SAFE if not already there)')}")
+        if not self.wait_for_input("Press Enter when switch is in SAFE position...", timeout=30.0):
+            result.skipped = True
+            result.detail = "Timeout waiting for SAFE position"
+            return
+
+        time.sleep(0.3)
+        safe_state = read_switch_state()
+        print(f"         {c(Colors.INFO, '           State detected:')}")
+        if safe_state == "SAFE":
+            print(f"         {c(Colors.GREEN, chr(0x2713) + f'           SAFE - Correct!')}")
+        else:
+            print(f"         {c(Colors.RED, chr(0x2717) + f'           {safe_state} - Expected SAFE')}")
+        print()
+
+        # Step 3: Ask user to put switch in ARMED
+        print(f"         {c(Colors.INFO, 'Step 3: Put the switch in ARMED position')}")
+        print(f"         {c(Colors.DIM, '           (Toggle to ARMED)')}")
+        if not self.wait_for_input("Press Enter when switch is in ARMED position...", timeout=30.0):
+            result.skipped = True
+            result.detail = "Timeout waiting for ARMED position"
+            return
+
+        time.sleep(0.3)
+        armed_state = read_switch_state()
+        print(f"         {c(Colors.INFO, '           State detected:')}")
+        if armed_state == "ARMED":
+            print(f"         {c(Colors.GREEN, chr(0x2713) + f'           ARMED - Correct!')}")
+        else:
+            print(f"         {c(Colors.RED, chr(0x2717) + f'           {armed_state} - Expected ARMED')}")
+        print()
+
+        # Step 4: Report results
+        print(f"         {c(Colors.INFO, 'Step 4: Test Results')}")
+        print(f"         {c(Colors.DIM, '-'*40)}")
+
+        safe_pass = safe_state == "SAFE"
+        armed_pass = armed_state == "ARMED"
+
+        if safe_pass and armed_pass:
+            print(f"         {c(Colors.GREEN, chr(0x2713) + ' SAFE detection: PASS')}")
+            print(f"         {c(Colors.GREEN, chr(0x2713) + ' ARMED detection: PASS')}")
+            result.passed = True
+            result.detail = "Switch correctly detected in both SAFE and ARMED positions"
+        elif safe_pass:
+            print(f"         {c(Colors.GREEN, chr(0x2713) + ' SAFE detection: PASS')}")
+            print(f"         {c(Colors.RED, chr(0x2717) + ' ARMED detection: FAIL (got ' + armed_state + ')')}")
+            result.passed = False
+            result.detail = f"SAFE detected correctly, ARMED failed (detected {armed_state})"
+        elif armed_pass:
+            print(f"         {c(Colors.RED, chr(0x2717) + ' SAFE detection: FAIL (got ' + safe_state + ')')}")
+            print(f"         {c(Colors.GREEN, chr(0x2713) + ' ARMED detection: PASS')}")
+            result.passed = False
+            result.detail = f"ARMED detected correctly, SAFE failed (detected {safe_state})"
+        else:
+            print(f"         {c(Colors.RED, chr(0x2717) + ' SAFE detection: FAIL (got ' + safe_state + ')')}")
+            print(f"         {c(Colors.RED, chr(0x2717) + ' ARMED detection: FAIL (got ' + armed_state + ')')}")
+            result.passed = False
+            result.detail = f"Both positions failed (SAFE={safe_state}, ARMED={armed_state})"
 
     # ── Communication Tests ───────────────────────────────────────────────────
 

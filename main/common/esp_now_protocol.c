@@ -175,16 +175,20 @@ void espnow_rx_task(void *pvParameters)
         ESP_LOGD(TAG, "RX: cmd=0x%02x state=%d data=%d",
                  packet.command, packet.base_state, packet.data);
 
-        if (packet.command == CMD_HALT) {
-            uint8_t cmd = packet.command;
-            xQueueSendToFront(state_event_queue, &cmd, 0);
-        } else if (packet.command >= CMD_DISPLAY_CLEAR &&
-                   packet.command <= CMD_DISPLAY_SENSOR) {
-            xQueueSend(display_cmd_queue, &packet, pdMS_TO_TICKS(50));
-        } else if (packet.command >= CMD_SAFE_SHORT_PRESS &&
-                   packet.command <= CMD_BAT_CRITICAL) {
+#ifdef BUILD_TARGET_BASE
+        /* BASE unit: handle state change commands from REMOTE */
+        if (packet.command == CMD_HALT ||
+            packet.command == CMD_SWITCH_TO_ARMED ||
+            packet.command == CMD_SWITCH_TO_SAFE ||
+            packet.command == CMD_BTN_LONG_PRESS) {
             uint8_t cmd = packet.command;
             xQueueSend(state_event_queue, &cmd, pdMS_TO_TICKS(50));
+        }
+#endif
+
+        if (packet.command >= CMD_DISPLAY_CLEAR &&
+                   packet.command <= CMD_DISPLAY_SENSOR) {
+            xQueueSend(display_cmd_queue, &packet, pdMS_TO_TICKS(50));
         } else if (packet.command >= CMD_LED_SAFE &&
                    packet.command <= CMD_BUTTON_LED_OFF) {
             uint8_t cmd = packet.command;

@@ -1,55 +1,59 @@
 # StaticTeststandController - Development TODO
 
-## Current Sprint: Phase 1 MVP Foundation
+## Completed: Phase 1 MVP ✅
 
-### Priority 1 - Start Here
+**Status:** COMPLETE (v1.1.105)
+**Date Completed:** 2026-02-10
 
-These 5 features should be implemented first, in order:
+### Priority 1 - Completed Features
 
-1. **Project Build Configuration** (`feature-1770190880132-roivcvnmd`)
-   - Create `sdkconfig.defaults` for ESP32-S3-N16R8
-   - Verify CMakeLists.txt conditional compilation (BASE vs REMOTE)
-   - Ensure both targets build successfully
-   - _No dependencies_
+These 5 features were implemented first, in order:
 
-2. **FreeRTOS Queue and Semaphore Setup** (`feature-1770190880201-7n4zu7247`)
-   - Define shared queues (espnow_rx_queue, adc_sample_queue, log_queue)
-   - Define semaphores (spi_mutex, sd_mutex, i2c_mutex)
-   - Create initialization function called from base_main/remote_main
-   - _Depends on: #1_
+1. **Project Build Configuration** ✅ COMPLETE
+   - Created `sdkconfig.defaults` for ESP32-S3-N16R8
+   - Verified CMakeLists.txt conditional compilation (BASE vs REMOTE)
+   - Both targets build successfully
+   - Automated build and flash script (`build_and_flash_all.sh`)
 
-3. **ESP-NOW Communication Protocol** (`feature-1770190880402-sykojp323`)
-   - Implement 25-byte packed packet structure
+2. **FreeRTOS Queue and Semaphore Setup** ✅ COMPLETE
+   - Defined shared queues (espnow_rx_queue, adc_sample_queue, log_queue, etc.)
+   - Defined semaphores (spi_mutex, sd_mutex, i2c_mutex - for Phase 2)
+   - Created initialization function in `shared_queues.c`
+   - Both BASE and REMOTE initialize on boot
+
+3. **ESP-NOW Communication Protocol** ✅ COMPLETE
+   - Implemented 25-byte packed packet structure
    - Send functions: critical (5 retries) and normal (single attempt)
    - Receive callback with queue posting
-   - Peer MAC registration
-   - _Depends on: #1_
+   - Peer MAC registration working
+   - Ping/response protocol operational
 
-4. **BASE State Machine Framework** (`feature-1770190880605-bug75r7wj`)
-   - Implement state enum (13 states)
+4. **BASE State Machine Framework** ✅ COMPLETE
+   - Implemented state enum (13 states)
    - State transition function with validation
    - State machine task (FreeRTOS)
    - State handler dispatch table
-   - _Depends on: #1, #2_
+   - Test mode support for automated testing
+   - All states accessible via serial command
 
-5. **REMOTE Input Handler** (`feature-1770190880808-hw7c8w7cx`)
+5. **REMOTE Input Handler** ✅ COMPLETE
    - Button detection: short press (<2s), long press (>=2s), double press (<500ms)
    - Switch detection: SAFE, ARMED, ERROR states
    - 50ms debouncing
    - FreeRTOS task with event queue
-   - _Depends on: #1_
 
----
+### Phase 1 Continued - Completed Features
 
-## Next Up: Phase 1 MVP Continued
-
-After the first 5, continue with these in parallel where possible:
-
-6. **REMOTE OLED Display Driver** - SSD1306 I2C driver, status line + 5-line log display
-7. **ESP-NOW RX/TX Tasks** - FreeRTOS tasks for send/receive with queue integration
-8. **BASE State Handlers - INIT and IDLE** - Initialization sequence and idle state logic
-9. **RGB LED Controller** - WS2812 driver with breathing, blink, pulse patterns
-10. **Switch Safety Logic** - Interlock logic preventing unsafe state transitions
+6. **REMOTE OLED Display Driver** ✅ COMPLETE - SSD1306 I2C driver, status line + 5-line log display
+7. **ESP-NOW RX/TX Tasks** ✅ COMPLETE - FreeRTOS tasks for send/receive with queue integration
+8. **BASE State Handlers - All States** ✅ COMPLETE - All 13 state handlers implemented
+9. **RGB LED Controller** ✅ COMPLETE - WS2812 driver with breathing, blink, pulse patterns
+10. **Switch Safety Logic** ✅ COMPLETE - Interlock logic preventing unsafe state transitions
+11. **Safety Watchdog** ✅ COMPLETE - Highest priority task monitors system health
+12. **Buzzer Controller** ✅ COMPLETE - LEDC PWM at 4000Hz for audio feedback
+13. **Button LED Control** ✅ COMPLETE - GPIO 17 control with proper initialization
+14. **Test Protocol** ✅ COMPLETE - Serial command interface for automated testing
+15. **Firmware Verification** ✅ COMPLETE - Auto-detect on connection
 
 ---
 
@@ -57,13 +61,60 @@ After the first 5, continue with these in parallel where possible:
 
 | Phase | Features | Status |
 |-------|----------|--------|
-| Infrastructure | 4 | Backlog |
-| Phase 1: MVP | 15 | Backlog |
-| Phase 2: ADC + Logging | 11 | Backlog |
-| Phase 3: Time Sync | 4 | Backlog |
-| Phase 4: Calibration | 7 | Backlog |
-| Phase 5: Future | 3 | Backlog |
-| Testing | 3 | Backlog |
+| Infrastructure | 4 | ✅ Complete |
+| Phase 1: MVP | 15 | ✅ Complete |
+| Phase 2: ADC + Logging | 11 | 🚧 Partial (scaffolded) |
+| Phase 3: Time Sync | 4 | ⏳ Not Started |
+| Phase 4: Calibration | 7 | ⏳ Not Started |
+| Phase 5: Future | 3 | ⏳ Not Started |
+| Testing | 3 | ✅ Complete |
+
+---
+
+## Current Sprint: Phase 2 - ADC & SD Card Logging
+
+### Priority 1 - Start Phase 2
+
+These features should be implemented next, in order:
+
+1. **AS1256 ADC Driver Implementation** (Phase 2)
+   - [ ] SPI communication with AS1256 24-bit ADC
+   - [ ] Channel reading (8 channels)
+   - [ ] Data ready interrupt handling (GPIO 40)
+   - [ ] ADC initialization and calibration
+   - [ ] Integration with state machine
+   - _Location: main/base/adc_as1256.c_
+
+2. **SD Card Logger Implementation** (Phase 2)
+   - [ ] SD card FAT32 mounting
+   - [ ] CSV file generation with headers
+   - [ ] Timestamped file naming (YYYY-MM-DD-HH-MM-SS.csv)
+   - [ ] Write operations at 1000 Hz
+   - [ ] Test summary generation
+   - [ ] Run log (runlog.txt) implementation
+   - _Location: main/base/sd_logger.c_
+
+3. **Settings Parser Implementation** (Phase 2)
+   - [ ] Parse settings.txt from SD card
+   - [ ] Handle missing/corrupt files (HALT)
+   - [ ] Comment handling (//)
+   - [ ] Calibration value storage
+   - [ ] WiFi credentials parsing
+   - _Location: main/base/settings.c_
+
+4. **High-Speed ADC Sampling Task** (Phase 2)
+   - [ ] FreeRTOS task at 1000 Hz
+   - [ ] Sample all 8 ADC channels
+   - [ ] Post to adc_sample_queue
+   - [ ] Raw-to-engineered unit conversion
+   - _Priority: P7_
+
+5. **End-of-Burn Detection Algorithm** (Phase 2)
+   - [ ] Baseline recording (first 0.5s)
+   - [ ] 5% threshold detection
+   - [ ] END_TEST_DELAY verification
+   - [ ] Post-burn logging period
+   - _Location: main/base/state_machine.c (TESTRUNNING state)_
 
 ---
 

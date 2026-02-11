@@ -29,7 +29,7 @@ static const char *TAG = "remote_main";
 
 static void init_gpio(void)
 {
-    /* Button LED output */
+    /* Button LED output - active HIGH, start OFF (low) */
     gpio_config_t led_cfg = {
         .pin_bit_mask = (1ULL << PIN_LED_BUTTON),
         .mode = GPIO_MODE_OUTPUT,
@@ -38,9 +38,9 @@ static void init_gpio(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&led_cfg);
-    gpio_set_level(PIN_LED_BUTTON, 0);
+    gpio_set_level(PIN_LED_BUTTON, 0);  /* OFF = low for active-HIGH */
 
-    /* Buzzer output - active low, start OFF (high) */
+    /* Buzzer output - active LOW, start OFF (HIGH) */
     gpio_config_t buz_cfg = {
         .pin_bit_mask = (1ULL << PIN_BUZZER),
         .mode = GPIO_MODE_OUTPUT,
@@ -49,7 +49,7 @@ static void init_gpio(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&buz_cfg);
-    gpio_set_level(PIN_BUZZER, 1);
+    gpio_set_level(PIN_BUZZER, 1);  /* OFF = HIGH for active-LOW */
 }
 
 void remote_main(void)
@@ -147,10 +147,11 @@ void remote_main(void)
     ESP_LOGI(TAG, "Playing startup notification (GPIO mode for quick beeps)");
 
     /* Use direct GPIO for boot beeps (buzzer task not ready yet) */
+    /* Active-LOW buzzer: LOW = ON, HIGH = OFF */
     for (int i = 0; i < 3; i++) {
-        gpio_set_level(PIN_BUZZER, 0);  /* ON (active low) */
+        gpio_set_level(PIN_BUZZER, 0);  /* ON (active-LOW) */
         vTaskDelay(pdMS_TO_TICKS(150));
-        gpio_set_level(PIN_BUZZER, 1);  /* OFF (active low) */
+        gpio_set_level(PIN_BUZZER, 1);  /* OFF (active-LOW) */
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 

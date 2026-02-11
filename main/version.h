@@ -10,7 +10,7 @@
 
 #define VERSION_MAJOR   1
 #define VERSION_MINOR   1
-#define BUILD_NUMBER    83
+#define BUILD_NUMBER    125
 
 /* Version string macros */
 #define STRINGIFY(x) #x
