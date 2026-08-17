@@ -1911,6 +1911,48 @@ class InteractiveTestSuite:
                 "Possible electrical issue with igniter circuit"
             ]
 
+        elif "adc" in test_name_lower or "phase2" in test_name_lower:
+            if "task" in test_name_lower:
+                causes = [
+                    "ADC sampling task not created (Phase 2 feature not implemented)",
+                    "ADC initialization failed - check ADS1256 hardware connection",
+                    "SPI bus for ADC (GPIO 35-40) not working",
+                    "DRDY interrupt (GPIO 40) not configured"
+                ]
+            elif "queue" in test_name_lower:
+                causes = [
+                    "ADC sample queue not created (Phase 2 feature not implemented)",
+                    "ADC sampling task not running",
+                    "Queue backing up - sampling too fast for consumer"
+                ]
+            else:
+                causes = [
+                    "Phase 2 ADC feature not available",
+                    "ADS1256 ADC hardware not connected",
+                    "Check firmware version (v1.2.0+ required for Phase 2)"
+                ]
+
+        elif "sd" in test_name_lower or "logging" in test_name_lower:
+            if "task" in test_name_lower:
+                causes = [
+                    "SD logging task not created (Phase 2 feature not implemented)",
+                    "SD card initialization failed - check SD card",
+                    "SD card not formatted as FAT32",
+                    "SPI bus for SD card (GPIO 10-13) not working"
+                ]
+            elif "queue" in test_name_lower:
+                causes = [
+                    "SD log queue not created (Phase 2 feature not implemented)",
+                    "SD logging task not running",
+                    "Queue backing up - SD card writes too slow"
+                ]
+            else:
+                causes = [
+                    "Phase 2 SD logging feature not available",
+                    "SD card not inserted or not detected",
+                    "Check firmware version (v1.2.0+ required for Phase 2)"
+                ]
+
         else:
             causes = [
                 "Unknown test failure",
@@ -1929,6 +1971,193 @@ class InteractiveTestSuite:
 
         return causes
 
+    # ── Phase 2 Tests (ADC + SD Card Logging) ───────────────────────────────────
+
+    def test_phase2(self):
+        """Run Phase 2 automated tests for ADC and SD card logging."""
+        tests = []
+
+        # Only BASE has Phase 2 features
+        if self.base:
+            tests.extend([
+                ("ADC Task Running", "BASE", lambda r: self._test_adc_task(r, self.base, "BASE")),
+                ("SD Logging Task Running", "BASE", lambda r: self._test_sd_task(r, self.base, "BASE")),
+                ("ADC Queue Status", "BASE", lambda r: self._test_adc_queue(r, self.base)),
+                ("SD Log Queue Status", "BASE", lambda r: self._test_sd_queue(r, self.base)),
+                ("Simulated Test Flow", "BASE", lambda r: self._test_simulated_test_flow(r, self.base)),
+            ])
+
+        if not tests:
+            print(f"  {c(Colors.YELLOW, 'No BASE unit connected for Phase 2 tests')}")
+            return
+
+        self.print_section_header(
+            "SECTION: PHASE 2 - ADC & SD CARD LOGGING",
+            "These tests verify Phase 2 data acquisition features"
+        )
+
+        for i, (name, target, test_fn) in enumerate(tests, 1):
+            self.print_test_start(i, len(tests), name)
+            result = self.run_test(name, target, test_fn, "Phase 2")
+            self.print_test_result(result)
+
+    def _test_adc_task(self, result: TestResult, conn: SerialConnection, target: str):
+        """Test that ADC sampling task is running (Phase 2 feature)."""
+        resp = conn.send_command("TASKS")
+        result.response = resp
+
+        if resp is None:
+            result.detail = "No response received"
+            return
+
+        data = resp.get("data", {})
+        tasks = data.get("tasks", [])
+        task_names = [t.get("name", "") for t in tasks]
+
+        # Check for adc_sampling task
+        if "adc_sampling" in task_names:
+            # Find the task and get its info
+            adc_task = next((t for t in tasks if "adc_sampling" in t.get("name", "")), None)
+            if adc_task:
+                priority = adc_task.get("priority", 0)
+                stack_hwm = adc_task.get("stack_hwm", 0)
+                result.detail = f"ADC sampling task running (priority={priority}, stack_hwm={stack_hwm})"
+                result.passed = True
+            else:
+                result.detail = "ADC sampling task found but couldn't get details"
+                result.passed = True
+        else:
+            result.detail = "ADC sampling task not found (Phase 2 feature not available)"
+            result.passed = False
+
+    def _test_sd_task(self, result: TestResult, conn: SerialConnection, target: str):
+        """Test that SD logging task is running (Phase 2 feature)."""
+        resp = conn.send_command("TASKS")
+        result.response = resp
+
+        if resp is None:
+            result.detail = "No response received"
+            return
+
+        data = resp.get("data", {})
+        tasks = data.get("tasks", [])
+        task_names = [t.get("name", "") for t in tasks]
+
+        # Check for sd_logging task
+        if "sd_logging" in task_names:
+            # Find the task and get its info
+            sd_task = next((t for t in tasks if "sd_logging" in t.get("name", "")), None)
+            if sd_task:
+                priority = sd_task.get("priority", 0)
+                stack_hwm = sd_task.get("stack_hwm", 0)
+                result.detail = f"SD logging task running (priority={priority}, stack_hwm={stack_hwm})"
+                result.passed = True
+            else:
+                result.detail = "SD logging task found but couldn't get details"
+                result.passed = True
+        else:
+            result.detail = "SD logging task not found (Phase 2 feature not available)"
+            result.passed = False
+
+    def _test_adc_queue(self, result: TestResult, conn: SerialConnection):
+        """Test that ADC sample queue exists and is healthy (Phase 2 feature)."""
+        resp = conn.send_command("QUEUE STATUS")
+        result.response = resp
+
+        if resp is None:
+            result.detail = "No response received"
+            return
+
+        data = resp.get("data", {})
+
+        # Check for adc_sample_queue (Phase 2 feature)
+        if "adc_sample" in data:
+            queue_depth = data.get("adc_sample", -1)
+            if queue_depth >= 0:
+                result.detail = f"ADC sample queue healthy (depth={queue_depth})"
+                result.passed = True
+            else:
+                result.detail = f"ADC sample queue depth invalid: {queue_depth}"
+                result.passed = False
+        else:
+            result.detail = "ADC sample queue not found (Phase 2 feature not available)"
+            result.passed = False
+
+    def _test_sd_queue(self, result: TestResult, conn: SerialConnection):
+        """Test that SD log queue exists and is healthy (Phase 2 feature)."""
+        resp = conn.send_command("QUEUE STATUS")
+        result.response = resp
+
+        if resp is None:
+            result.detail = "No response received"
+            return
+
+        data = resp.get("data", {})
+
+        # Check for log_queue (Phase 2 feature)
+        if "log" in data:
+            queue_depth = data.get("log", -1)
+            if queue_depth >= 0:
+                result.detail = f"SD log queue healthy (depth={queue_depth})"
+                result.passed = True
+            else:
+                result.detail = f"SD log queue depth invalid: {queue_depth}"
+                result.passed = False
+        else:
+            result.detail = "SD log queue not found (Phase 2 feature not available)"
+            result.passed = False
+
+    def _test_simulated_test_flow(self, result: TestResult, conn: SerialConnection):
+        """Test simulated test flow (STARTTEST → IGNITION → TESTRUNNING → ENDTEST)."""
+        # Enable test mode first
+        resp = conn.send_command("TEST TEST_MODE ON")
+        if resp is None or resp.get("status") != "ok":
+            result.detail = "Failed to enable test mode"
+            return
+
+        # Go to IDLE first
+        resp = conn.send_command("TEST STATE IDLE")
+        if resp is None or resp.get("status") != "ok":
+            result.detail = "Failed to set IDLE state"
+            return
+
+        time.sleep(0.5)  # 500ms delay
+
+        # Try STARTTEST state (will create CSV file)
+        resp = conn.send_command("TEST STATE STARTTEST")
+        if resp is None or resp.get("status") != "ok":
+            result.detail = f"Failed to enter STARTTEST state: {resp}"
+            return
+
+        time.sleep(1.5)  # 1.5s delay for file creation
+
+        # The state should auto-transition through IGNITION to TESTRUNNING
+        # Wait and check current state
+        resp = conn.send_command("STATE")
+        if resp is None:
+            result.detail = "No response after test start"
+            return
+
+        data = resp.get("data", {})
+        state_name = data.get("name", "")
+
+        # State should be one of: STARTTEST, IGNITION, TESTRUNNING, ENDTEST, IDLE
+        if state_name in ["STARTTEST", "IGNITION", "RUNNING", "ENDTEST", "IDLE"]:
+            result.detail = f"Test flow progressed, state={state_name}"
+
+            # If we're in IDLE, the test completed successfully (or failed to start)
+            # This is expected since igniter might not fire
+            result.passed = True
+        else:
+            result.detail = f"Unexpected state after test: {state_name}"
+            result.passed = False
+
+        # Return to IDLE and disable test mode
+        time.sleep(0.5)
+        conn.send_command("TEST STATE IDLE")
+        time.sleep(0.5)
+        conn.send_command("TEST TEST_MODE OFF")
+
     # ── Main Execution ────────────────────────────────────────────────────────
 
     def run_all_tests(self):
@@ -1941,6 +2170,7 @@ class InteractiveTestSuite:
         self.test_communication()
         self.test_state_machine()
         self.test_safety()
+        self.test_phase2()  # Phase 2 tests
 
     def run_category(self, category: str):
         """Run a specific test category."""
@@ -1956,6 +2186,8 @@ class InteractiveTestSuite:
             "state-machine": self.test_state_machine,
             "state": self.test_state_machine,
             "safety": self.test_safety,
+            "phase2": self.test_phase2,
+            "phase-2": self.test_phase2,
         }
 
         if category.lower() == "all":

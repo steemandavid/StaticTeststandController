@@ -223,9 +223,8 @@ IDLE → CHECK_IGNITER (ignition button press while SAFE)
 ARMED → STARTTEST (ignition button long press)
 STARTTEST → IGNITION
 IGNITION → TESTRUNNING
-TESTRUNNING → ENDTEST (burn complete)
-ENDTEST → HALT
-Any state → HALT (on critical error)
+TESTRUNNING → ENDTEST (burn complete). Program stays in this state until reboot.
+Any state → HALT (on critical error).
 ```
 
 ### 4.2 Settings File (settings.txt)

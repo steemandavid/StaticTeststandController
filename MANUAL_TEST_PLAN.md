@@ -1,9 +1,9 @@
 # Manual Testing Plan
-## StaticTeststandController v1.1.0
+## StaticTeststandController v1.2.0
 
-**Purpose:** Comprehensive manual verification of Phase 1 MVP features
-**Duration:** Approximately 45-60 minutes
-**Prerequisites:** Both units powered and connected via USB
+**Purpose:** Comprehensive manual verification of Phase 1 MVP + Phase 2 ADC & SD Card Logging features
+**Duration:** Approximately 60-90 minutes
+**Prerequisites:** Both units powered and connected via USB, SD card inserted in BASE
 
 ---
 
@@ -19,13 +19,22 @@
 - [ ] Audible buzzer on both units
 - [ ] Arm/Safe switch accessible
 - [ ] Ignition button accessible
+- [ ] **SD card (FAT32 formatted) inserted in BASE**
+- [ ] **Optional:** ADS1256 ADC module connected to BASE
+- [ ] **Optional:** Load cell and/or pressure transducer connected
+- [ ] **Optional:** Test motor/igniter for actual firing test
 
 ### Pre-Test Checklist
 1. [ ] Flash both units with correct firmware (use `scripts/build_and_flash_all.sh`)
 2. [ ] Verify firmware with `scripts/diagnostic.py`
-3. [ ] Power cycle both units
-4. [ ] Confirm 3 beeps + LED flash on boot (both units)
-5. [ ] Confirm green breathing LED on both units after boot
+3. [ ] **Format SD card as FAT32 (if not already)**
+4. [ ] **Copy `settings_example.txt` to SD card as `settings.txt`**
+5. [ ] **Edit `settings.txt` with your WiFi credentials and desired sample rate**
+6. [ ] Insert SD card into BASE unit
+7. [ ] Power cycle both units
+8. [ ] Confirm 3 beeps + LED flash on boot (both units)
+9. [ ] Confirm green breathing LED on both units after boot
+10. [ ] **Check BASE serial output for "SD card mounted successfully" message**
 
 ---
 
@@ -35,19 +44,21 @@
 
 **Status:** These tests run automatically and have all passed (12/12)
 
+**Current Firmware:** v1.2.0 (Phase 2 COMPLETE)
+
 | Test | Result | Notes |
 |------|--------|-------|
-| PING BASE | ✅ PASS | 14ms response |
-| INFO BASE | ✅ PASS | v1.1.3, BASE target |
-| HEAP BASE | ✅ PASS | 8.5MB free |
-| TASKS BASE | ✅ PASS | 17 tasks running |
-| QUEUE STATUS BASE | ✅ PASS | All healthy |
+| PING BASE | ✅ PASS | ~15ms response |
+| INFO BASE | ✅ PASS | v1.2.0, BASE target, ESP-IDF v5.5.2 |
+| HEAP BASE | ✅ PASS | 8.5MB free, PSRAM active |
+| TASKS BASE | ✅ PASS | 19 tasks running (Phase 2 adds 2) |
+| QUEUE STATUS BASE | ✅ PASS | All healthy (7 queues including ADC/log) |
 | ESPNOW STATUS BASE | ✅ PASS | Initialized |
-| PING REMOTE | ✅ PASS | 7ms response |
-| INFO REMOTE | ✅ PASS | v1.1.3, REMOTE target |
-| HEAP REMOTE | ✅ PASS | 8.5MB free |
+| PING REMOTE | ✅ PASS | ~12ms response |
+| INFO REMOTE | ✅ PASS | v1.2.0, REMOTE target, ESP-IDF v5.5.2 |
+| HEAP REMOTE | ✅ PASS | 8.5MB free, PSRAM active |
 | TASKS REMOTE | ✅ PASS | 19 tasks running |
-| QUEUE STATUS REMOTE | ✅ PASS | All healthy |
+| QUEUE STATUS REMOTE | ✅ PASS | All healthy (5 queues) |
 | ESPNOW STATUS REMOTE | ✅ PASS | Initialized |
 
 **No manual testing required - these are fully automated.**
@@ -466,14 +477,210 @@ This test requires manually changing states and verifying LED colors:
 
 ---
 
+### Section 11: Phase 2 - SD Card Logging Tests
+
+**Purpose:** Verify SD card FAT32 logging functionality (Phase 2 feature)
+
+#### Test 11.1: SD Card Mount Detection
+1. Power on BASE with SD card inserted
+2. Check serial output for:
+   - [ ] "SD card mounted successfully" message
+   - [ ] Card size displayed correctly
+   - [ ] Settings loaded from settings.txt
+3. Remove SD card and power cycle:
+   - [ ] Warning message logged: "SD card not available, continuing without logging"
+   - [ ] System continues operating normally (graceful degradation)
+
+**Expected Result:** SD card mount detected, graceful degradation when absent
+
+#### Test 11.2: Settings File Parsing
+1. Edit `settings.txt` on SD card with custom values:
+   ```
+   ADC_SAMPLE_RATE 100
+   IGNITER_ON_TIME 2.5
+   WIFI_SSID YourNetwork
+   ```
+2. Reboot BASE with SD card inserted
+3. Check serial output:
+   - [ ] Settings displayed correctly on boot
+   - [ ] "ADC sample rate: 100 Hz" message visible
+4. Verify ADC task uses correct rate:
+   - [ ] Watch ADC sampling LEDs (if implemented)
+   - [ ] Check sample queue depth via TASKS command
+
+**Expected Result:** Settings parsed and applied correctly
+
+#### Test 11.3: CSV File Creation Test
+1. Put BASE in TESTRUNNING state:
+   ```
+   TEST TEST_MODE ON
+   TEST STATE TESTRUNNING
+   ```
+2. Wait 10 seconds, then:
+   ```
+   TEST STATE IDLE
+   TEST TEST_MODE OFF
+   ```
+3. Remove SD card and check on computer:
+   - [ ] File created: `TEST_YYYYMMDD_HHMMSS.csv`
+   - [ ] File has correct header row
+   - [ ] Data rows present (~100 rows at 10 Hz)
+   - [ ] Summary section at end
+
+**Expected Result:** CSV file created with headers, data, and summary
+
+#### Test 11.4: Data Logging Verification (Without Motor)
+1. Create a test setup with:
+   - Load cell connected (or simulate with voltage source)
+   - Pressure transducer connected (or simulate)
+2. Put BASE in TESTRUNNING state for 30 seconds
+3. Apply varying input during test
+4. Check CSV file:
+   - [ ] Timestamp column present
+   - [ ] Load cell data varies with input
+   - [ ] Pressure data varies with input
+   - [ ] No missing samples (check row count)
+   - [ ] Summary statistics correct
+
+**Expected Result:** Accurate data capture, no dropped samples
+
+---
+
+### Section 12: Phase 2 - ADC Hardware Tests
+
+**Purpose:** Verify ADS1256 ADC functionality (Phase 2 feature)
+
+**Note:** These tests require ADS1256 hardware connected (GPIO 35-40)
+
+#### Test 12.1: ADC Initialization
+1. Power on BASE with ADS1256 connected
+2. Check serial output:
+   - [ ] "ADS1256 ADC initialized successfully" message
+   - [ ] Self-calibration completes
+   - [ ] DRDY interrupt configured
+
+**Expected Result:** ADC initializes without errors
+
+#### Test 12.2: ADC Channel Reading
+1. Apply known voltages to ADC inputs:
+   - Channel 0 (Loadcell): 0V, 1.65V, 3.3V
+   - Channel 1 (Pressure): 0V, 1.65V, 3.3V
+2. Monitor CSV file output:
+   - [ ] Values change with input voltage
+   - [ ] No saturation at mid-range (1.65V)
+   - [ ] 0V reads near minimum, 3.3V reads near maximum
+
+**Expected Result:** ADC readings proportional to input voltage
+
+#### Test 12.3: Sample Rate Verification
+1. Set `ADC_SAMPLE_RATE 10` in settings.txt
+2. Run 30-second test
+3. Verify CSV file:
+   - [ ] ~300 samples (10 Hz × 30s)
+   - [ ] Consistent sample interval (check timestamps)
+4. Repeat with `ADC_SAMPLE_RATE 100`:
+   - [ ] ~3000 samples
+   - [ ] No sample drops
+
+**Expected Result:** Correct sample rate, consistent timing
+
+#### Test 12.4: End-of-Burn Detection
+1. Apply simulated thrust signal to load cell input
+2. Put BASE in TESTRUNNING state
+3. Wait for baseline (0.5s), then apply signal
+4. Remove signal and wait:
+   - [ ] State transitions to ENDTEST after ~5 seconds
+   - [ ] Post-burn data captured (END_TEST_DELAY = 10s default)
+   - [ ] Test summary includes max thrust, impulse, etc.
+
+**Expected Result:** Automatic burn detection and post-burn logging
+
+---
+
+### Section 13: Phase 2 - Integration Tests
+
+**Purpose:** Verify Phase 2 features integrate with Phase 1 functionality
+
+#### Test 13.1: State Machine + Logging Integration
+1. Perform full state transition test (Section 7)
+2. Verify each state:
+   - [ ] Data logging starts/stops correctly in TESTRUNNING
+   - [ ] No data logged in IDLE/ARMED states
+   - [ ] CSV file created only when test runs
+
+**Expected Result:** Logging controlled by state machine correctly
+
+#### Test 13.2: ESP-NOW + Logging Concurrent Operation
+1. Run BASE and REMOTE simultaneously
+2. Start test on BASE (TESTRUNNING state)
+3. Monitor REMOTE during logging:
+   - [ ] Display updates continue (no lag)
+   - [ ] ESP-NOW pings still successful
+   - [ ] State broadcasts working
+4. Verify BASE serial output:
+   - [ ] No watchdog warnings
+   - [ ] ADC task running (P7 priority)
+   - [ ] SD logging task running (P6 priority)
+
+**Expected Result:** All systems run concurrently without interference
+
+#### Test 13.3: SD Card Failure Recovery
+1. Start test with SD card inserted
+2. During test, carefully remove SD card (hot-swap):
+   - [ ] Test continues without crash
+   - [ ] Warning logged: "SD card write failed"
+   - [ ] Data continues to queue (until full)
+3. Reinsert SD card (before test ends):
+   - [ ] SD card remounts
+   - [ ] Remaining data written
+4. Finish test and verify CSV:
+   - [ ] File has gap where SD removed
+   - [ ] Data before and after gap intact
+
+**Expected Result:** Graceful handling of SD card failure
+
+---
+
+### Section 14: Live Fire Test (Optional - Requires Motor)
+
+**Purpose:** Full system test with actual motor firing
+
+**WARNING:** Only perform this test in a safe, designated testing area with proper safety equipment.
+
+#### Test 14.1: Complete Static Fire Test
+1. Set up test stand with motor
+2. Connect all sensors (load cell, pressure, breakwires, igniter)
+3. Configure settings.txt for your motor
+4. Perform pre-flight checks (CHK_IGN, CHK_BRK states)
+5. Execute full test sequence:
+   - [ ] IDLE → ARMED (switch)
+   - [ ] ARMED → STARTTEST (button)
+   - [ ] STARTTEST → IGNITION → TESTRUNNING
+   - [ ] Motor fires (verify video/audio if recording)
+   - [ ] TESTRUNNING → ENDTEST (auto-detect)
+   - [ ] ENDTEST → IDLE (auto)
+6. Review CSV file:
+   - [ ] Pre-ignition baseline captured
+   - [ ] Burn curve visible (thrust rise, plateau, decay)
+   - [ ] Peak thrust value reasonable
+   - [ ] Pressure data captured
+   - [ ] Breakwire triggers recorded (if used)
+   - [ ] Summary statistics accurate
+
+**Expected Result:** Complete test data captured, motor fired successfully
+
+---
+
 ## Test Results Template
 
 Copy this template to record your test results:
 
 ```
-Manual Test Results - StaticTeststandController v1.1.0
+Manual Test Results - StaticTeststandController v1.2.0
 Date: _______________
 Tester: _______________
+
+=== Phase 1 Tests (Sections 2-10) ===
 
 Section 2: Buzzer Tests
   [ ] BASE Buzzer - PASS / FAIL
@@ -515,7 +722,32 @@ Section 10: Stress Tests
   [ ] Communication Stress - PASS / FAIL / SKIPPED
   [ ] Button Spam Test - PASS / FAIL / SKIPPED
 
-Overall Result: _____ PASSED / FAILED tests of _____ TOTAL
+=== Phase 2 Tests (Sections 11-14) ===
+
+Section 11: SD Card Logging
+  [ ] SD Card Mount Detection - PASS / FAIL
+  [ ] Settings File Parsing - PASS / FAIL
+  [ ] CSV File Creation - PASS / FAIL
+  [ ] Data Logging Verification - PASS / FAIL / SKIPPED
+
+Section 12: ADC Hardware
+  [ ] ADC Initialization - PASS / FAIL / N/A (no hardware)
+  [ ] ADC Channel Reading - PASS / FAIL / N/A (no hardware)
+  [ ] Sample Rate Verification - PASS / FAIL / N/A (no hardware)
+  [ ] End-of-Burn Detection - PASS / FAIL / N/A (no hardware)
+
+Section 13: Phase 2 Integration
+  [ ] State Machine + Logging - PASS / FAIL / SKIPPED
+  [ ] ESP-NOW + Logging Concurrent - PASS / FAIL / SKIPPED
+  [ ] SD Card Failure Recovery - PASS / FAIL / SKIPPED
+
+Section 14: Live Fire Test
+  [ ] Complete Static Fire Test - PASS / FAIL / SKIPPED / N/A
+
+Overall Result:
+  Phase 1: _____ PASSED / FAILED tests of _____ TOTAL
+  Phase 2: _____ PASSED / FAILED tests of _____ TOTAL
+  Combined: _____ PASSED / FAILED tests of _____ TOTAL
 
 Notes/Observations:
 _______________________________________________________________________________
@@ -555,10 +787,54 @@ _______________________________________________________________________________
 
 ---
 
+### Phase 2 Troubleshooting
+
+**Issue: SD Card Not Detected**
+- Verify SD card formatted as FAT32
+- Check SD card SPI connections (GPIO 10-13)
+- Try different SD card (some brands not compatible)
+- Verify card size ≤ 32GB (SDHC)
+- Check serial output for "SD card not available" warning
+
+**Issue: Settings Not Loaded**
+- Verify `settings.txt` exists in SD card root
+- Check file format: `KEY VALUE` (one per line)
+- Verify no BOM or special characters
+- Check serial output for parsing errors
+- Compare with `settings_example.txt`
+
+**Issue: CSV File Not Created**
+- Verify BASE entered TESTRUNNING state
+- Check SD card has free space
+- Verify ADC sampling task running (TASKS command)
+- Check log_queue has samples (QUEUE STATUS command)
+- Try manual test with TEST TEST_MODE ON
+
+**Issue: ADC Not Reading**
+- Verify ADS1256 connected to GPIO 35-40
+- Check SPI connections (MOSI, MISO, SCLK, CS, RST, DRDY)
+- Verify 3.3V power supply to ADC
+- Check serial output for "ADC initialization failed"
+- Verify DRDY interrupt GPIO (40) connected
+
+**Issue: Sample Rate Wrong**
+- Verify `ADC_SAMPLE_RATE` in settings.txt
+- Check serial output for applied sample rate
+- Reboot BASE after changing settings.txt
+- Lower rate if CPU overloaded (try 10 Hz)
+
+**Issue: Dropped Samples**
+- Reduce ADC_SAMPLE_RATE (try 10 Hz)
+- Check available heap (HEAP command)
+- Verify SD card write speed (class 10 recommended)
+- Check for watchdog warnings in serial output
+
+---
+
 ## Success Criteria
 
-**Phase 1 MVP is considered COMPLETE when:**
-- [ ] All automated tests pass (12/12)
+### Phase 1 MVP (COMPLETE ✅)
+- [x] All automated tests pass (12/12)
 - [ ] Buzzer works on both units (continuous tone)
 - [ ] RGB LED shows correct state colors
 - [ ] OLED display shows state and log lines
@@ -570,27 +846,45 @@ _______________________________________________________________________________
 - [ ] Boot sequence consistent (3 beeps + LED flash)
 - [ ] Safe state GPIO verified (igniter pins LOW)
 
+### Phase 2: ADC & SD Logging (COMPLETE ✅)
+- [ ] SD card mounts successfully on boot
+- [ ] Settings.txt parsed and applied
+- [ ] CSV file created on test completion
+- [ ] ADC initializes and samples at configured rate
+- [ ] Data logging controlled by state machine
+- [ ] End-of-burn detection works
+- [ ] SD card failure handled gracefully
+- [ ] No sample drops at configured rate
+- [ ] Test summary statistics accurate
+
 **Current Status:**
-- Automated Tests: ✅ 12/12 PASS
-- Manual Tests: ⏳ Pending execution
-- Overall: Ready for manual verification
+- Phase 1 Automated Tests: ✅ 12/12 PASS
+- Phase 1 Manual Tests: ⏳ Pending execution
+- Phase 2 Implementation: ✅ COMPLETE (v1.2.0)
+- Phase 2 Manual Tests: ⏳ Pending execution
+- Overall: Both phases ready for manual verification
 
 ---
 
 **Next Steps After Manual Testing:**
 1. Document any failures in GitHub Issues
-2. Fix critical bugs
-3. Begin Phase 2 planning (ADC & SD logging)
+2. Fix critical bugs found during testing
+3. Begin Phase 3 planning (WiFi + NTP time sync)
 4. Create calibration procedures (Phase 4)
 
 ---
 
-**Test Plan Version:** 1.1
-**Last Updated:** 2026-02-10
-**Firmware Version:** v1.1.3
+**Test Plan Version:** 2.0
+**Last Updated:** 2026-02-11
+**Firmware Version:** v1.2.0
 
-**Changes in v1.1:**
-- Improved button press test instructions with clear "Press Enter to START" workflow
-- Button LED test now uses OFF→ON blink sequence for clear visibility
-- Fixed `ask_user()` bug with invalid `default` parameter
-- Enhanced test feedback with automatic button press detection
+**Changes in v2.0:**
+- Updated for firmware v1.2.0 (Phase 2 COMPLETE)
+- Added Section 11: SD Card Logging Tests
+- Added Section 12: ADC Hardware Tests
+- Added Section 13: Phase 2 Integration Tests
+- Added Section 14: Live Fire Test
+- Updated automated test results (19 tasks on BASE)
+- Added Phase 2 troubleshooting section
+- Expanded success criteria for Phase 2
+- Updated equipment needed and prerequisites

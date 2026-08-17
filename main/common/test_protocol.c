@@ -47,6 +47,9 @@ static volatile bool s_active = false;
 
 static void send_ok(const char *command, const char *data_json)
 {
+    /* Print newline BEFORE JSON to separate from ESP log output (ESP_LOGW doesn't add newline) */
+    printf("\n");
+    /* Print newline AFTER JSON to separate from subsequent ESP log output */
     printf("{\"status\":\"ok\",\"command\":\"%s\",\"data\":%s}\n", command, data_json);
     fflush(stdout);
 }
@@ -142,10 +145,10 @@ static void handle_test_mode(const char *args)
     /* TEST_MODE ON/OFF - enable or disable test mode */
     if (strcmp(args, "ON") == 0) {
         state_machine_set_test_mode(true);
-        send_ok("TEST_MODE", "{\"enabled\":true}");
+        send_ok("TEST_MODE", "{\"enabled\": true}");
     } else if (strcmp(args, "OFF") == 0) {
         state_machine_set_test_mode(false);
-        send_ok("TEST_MODE", "{\"enabled\":false}");
+        send_ok("TEST_MODE", "{\"enabled\": false}");
     } else {
         send_error("TEST_MODE", "Usage: TEST TEST_MODE ON|OFF");
     }
@@ -232,20 +235,42 @@ static void handle_tasks(void)
 
     UBaseType_t actual = uxTaskGetSystemState(task_array, count, NULL);
 
-    /* Build JSON array */
-    printf("{\"status\":\"ok\",\"command\":\"TASKS\",\"data\":{\"count\":%lu,\"tasks\":[",
-           (unsigned long)actual);
-    for (UBaseType_t i = 0; i < actual; i++) {
-        if (i > 0) printf(",");
-        printf("{\"name\":\"%s\",\"state\":%d,\"priority\":%lu,\"stack_hwm\":%lu}",
-               task_array[i].pcTaskName,
-               (int)task_array[i].eCurrentState,
-               (unsigned long)task_array[i].uxCurrentPriority,
-               (unsigned long)task_array[i].usStackHighWaterMark);
+    /* Build complete JSON in buffer to avoid printf interleaving from other tasks */
+    /* Allocate enough space: overhead + tasks * (task_name + 4 numbers + JSON syntax) */
+    size_t buf_size = 256 + (actual * 128);
+    char *json_buf = malloc(buf_size);
+    if (json_buf == NULL) {
+        free(task_array);
+        send_error("TASKS", "Failed to allocate memory");
+        return;
     }
-    printf("]}}\n");
+
+    /* Build JSON header */
+    int offset = snprintf(json_buf, buf_size,
+        "{\"status\":\"ok\",\"command\":\"TASKS\",\"data\":{\"count\":%lu,\"tasks\":[",
+        (unsigned long)actual);
+
+    /* Add each task */
+    for (UBaseType_t i = 0; i < actual && offset < (int)buf_size - 128; i++) {
+        if (i > 0) {
+            offset += snprintf(json_buf + offset, buf_size - offset, ",");
+        }
+        offset += snprintf(json_buf + offset, buf_size - offset,
+            "{\"name\":\"%s\",\"state\":%d,\"priority\":%lu,\"stack_hwm\":%lu}",
+            task_array[i].pcTaskName,
+            (int)task_array[i].eCurrentState,
+            (unsigned long)task_array[i].uxCurrentPriority,
+            (unsigned long)task_array[i].usStackHighWaterMark);
+    }
+
+    /* Close JSON */
+    snprintf(json_buf + offset, buf_size - offset, "]}}\n");
+
+    /* Send complete JSON in one call */
+    printf("%s", json_buf);
     fflush(stdout);
 
+    free(json_buf);
     free(task_array);
 }
 

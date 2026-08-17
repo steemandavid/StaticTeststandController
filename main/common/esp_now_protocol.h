@@ -24,6 +24,10 @@ typedef struct {
 #define CMD_COMMS_WARNING       0x02
 #define CMD_COMMS_ERROR         0x03
 #define CMD_HALT                0x04
+#define CMD_IGNITION            0x05  /* Internal: start igniter */
+#define CMD_START_RUNNING       0x06  /* Internal: begin test running */
+#define CMD_END_TEST            0x07  /* Internal: test complete */
+#define CMD_TO_IDLE             0x08  /* Internal: return to idle */
 
 /* Input Commands - REMOTE to BASE (0x10-0x3F) */
 #define CMD_SAFE_SHORT_PRESS    0x10

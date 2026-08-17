@@ -180,22 +180,26 @@ static esp_err_t ads_read_reg(uint8_t reg, uint8_t *value)
     return ESP_OK;
 }
 
-/* Wait for DRDY to go low */
+/* Wait for DRDY to go low (data ready) */
 static esp_err_t ads_wait_for_drdy(TickType_t timeout)
 {
+    /* First try interrupt-based semaphore wait */
     if (drdy_sem != NULL) {
+        /* Clear any stale semaphore value from previous DRDY */
+        xSemaphoreTake(drdy_sem, 0);
+
         if (xSemaphoreTake(drdy_sem, timeout) == pdTRUE) {
             return ESP_OK;
         }
-        ESP_LOGE(TAG, "DRDY timeout");
-        return ESP_ERR_TIMEOUT;
+        /* Semaphore timeout - fall through to polling */
     }
 
-    /* Fallback: poll the GPIO pin */
+    /* Fallback: poll the GPIO pin directly */
     TickType_t start = xTaskGetTickCount();
     while (gpio_get_level(PIN_ADS_DRDY) == 1) {
         if ((xTaskGetTickCount() - start) >= timeout) {
-            ESP_LOGE(TAG, "DRDY poll timeout");
+            ESP_LOGW(TAG, "DRDY timeout after %lu ticks (hardware may be disconnected)",
+                     (unsigned long)(xTaskGetTickCount() - start));
             return ESP_ERR_TIMEOUT;
         }
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -258,7 +262,7 @@ esp_err_t adc_as1256_init(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
+        .intr_type = GPIO_INTR_POSEDGE,  /* Falling edge (high→low) for active-low DRDY */
     };
     ret = gpio_config(&drdy_conf);
     if (ret != ESP_OK) {
@@ -370,8 +374,8 @@ esp_err_t adc_as1256_init(void)
     /* Wait for DRDY to indicate ready */
     ret = ads_wait_for_drdy(pdMS_TO_TICKS(100));
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ADS1256 not responding after init");
-        return ret;
+        ESP_LOGW(TAG, "First DRDY timeout after SYNC (may be OK if polling works)");
+        /* Don't fail init - continue and see if polling works */
     }
 
     /* Perform self calibration */

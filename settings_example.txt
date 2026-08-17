@@ -14,7 +14,7 @@
 
 # How long (in seconds) to keep the igniter activated during a test
 # Range: 0.1 - 10.0 seconds
-IGNITER_ON_TIME 0.5
+IGNITER_ON_TIME 1
 
 # ============================================================================
 # ADC Port Assignments (0-7)
@@ -38,8 +38,8 @@ ADC_PORT_BREAKWIRE 3 4 5 6
 # WiFi Settings (for Phase 3 NTP time sync)
 # ============================================================================
 
-WIFI_SSID YourWiFiSSID
-WIFI_PASSWORD YourWiFiPassword
+WIFI_SSID Steeman-gast
+WIFI_PASSWORD wees-welkom-op-onze-wifi
 
 # ============================================================================
 # ADC Configuration
@@ -48,7 +48,7 @@ WIFI_PASSWORD YourWiFiPassword
 # Sample rate in Hz (10 - 10000 Hz)
 # Lower rate = less CPU usage, higher rate = more data points
 # Default: 100 Hz (reduced from 1000 Hz for stability)
-ADC_SAMPLE_RATE 100
+ADC_SAMPLE_RATE 10
 
 # ============================================================================
 # ADC Calibration Values
@@ -76,7 +76,7 @@ ADC_CAL_BREAKWIRE 1.0 1.0 1.0 1.0
 # ============================================================================
 
 # Time before warning about poor communication
-COMMS_WARNING_TIMEOUT 5
+COMMS_WARNING_TIMEOUT 2
 
 # Time before entering HALT due to communication failure
 COMMS_ERROR_TIMEOUT 10
@@ -87,7 +87,7 @@ COMMS_ERROR_TIMEOUT 10
 
 # How long (in seconds) to continue logging after burn ends
 # This captures the cooldown period data
-END_TEST_DELAY 5
+END_TEST_DELAY 10
 
 # ============================================================================
 # END OF SETTINGS FILE

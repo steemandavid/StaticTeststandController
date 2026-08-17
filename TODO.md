@@ -244,6 +244,176 @@ These features are planned for future development (from FSD Section 7, Phase 5):
 - **Auto Power-Off Circuit** (`feature-1770206713333-autopwr04`) - ESP32-S3 deep sleep for REMOTE battery preservation
 - **Web Interface for Data Viewing** (`feature-1770206713334-webview05`) - HTTP server on BASE for data access and live monitoring
 - **Multi-Motor Support** (`feature-1770206713335-multimt06`) - Sequential/simultaneous ignition of multiple motors
+- **Flash Backup Logging** (`feature-flashbackup`) - Flash memory backup logging for SD card failure recovery
+
+---
+
+## Flash Backup Logging Feature - Resource Analysis
+
+### Feature Description
+Add flash memory as a backup storage medium for test data in case SD card fails or is removed. This provides redundancy for critical test data.
+
+### ESP32-S3-N16R8 Resource Analysis
+
+**Hardware Specifications:**
+- Flash: 16MB (128 Mbit)
+- PSRAM: 8MB
+- SRAM: 512KB
+- CPU: 240MHz dual-core (Xtensa LX7)
+- SPI: Two SPI buses (SPI2 for ADC, SPI3 for SD card via SDMMC)
+
+**Data Volume at Different Sample Rates:**
+| Sample Rate | Data Size (60s test) | Notes |
+|-------------|---------------------|-------|
+| 10 Hz | ~9.6 KB | Current default |
+| 100 Hz | ~96 KB | Configurable |
+| 1000 Hz | ~960 KB (~1 MB) | Max design spec |
+
+**Data per sample:**
+- 8 channels × 2 bytes (int16) = 16 bytes
+- Timestamp (int64) = 8 bytes
+- Total = 24 bytes per sample
+- Plus CSV overhead (commas, newline) ≈ 32 bytes/sample
+
+### Implementation Options
+
+#### Option 1: Concurrent Flash + SD Writing (Redundancy Mode)
+Write to both flash and SD card simultaneously during test.
+
+**Pros:**
+- Maximum redundancy - automatic failover
+- No post-test copy delay
+- True parallel storage
+
+**Cons:**
+- SPI bus contention (SDMMC uses SPI3, flash uses instruction cache)
+- Higher CPU overhead during critical test period
+- Increased flash wear (10K-100K erase cycles)
+- More complex error handling
+
+**Feasibility Assessment:**
+- ✅ **RAM:** PSRAM (8MB) can easily buffer writes
+- ⚠️ **CPU:** At 10 Hz - easily feasible; At 1000 Hz - may impact ADC sampling
+- ⚠️ **Flash Wear:** Daily tests = ~3650/year - exceeds 10K cycle rating in 3 years
+- ⚠️ **SPI Bus:** SDMMC (SD card) and instruction cache (flash) share internal bus
+
+**Recommendation:** Not recommended for frequent use. Flash endurance is the limiting factor.
+
+#### Option 2: Flash-Primary, Copy-to-SD After Test (Recommended)
+Write to flash during test, then copy to SD card in ENDTEST state.
+
+**Pros:**
+- Minimal SPI contention during test (no SD card writes)
+- Lower CPU overhead during critical sampling
+- Reduced flash wear (only erase when copying)
+- Simpler error recovery
+- Better for high sample rates (100-1000 Hz)
+
+**Cons:**
+- Data at risk if system crashes before copy completes
+- Post-test delay for file copy (~1-10 seconds depending on size)
+- Requires sufficient flash partition space
+
+**Feasibility Assessment:**
+- ✅ **Flash Space:** 16MB easily holds hundreds of tests even at 1000 Hz
+- ✅ **CPU:** Single write path - minimal overhead
+- ✅ **Flash Wear:** Erase once per test (vs. continuous wear in concurrent mode)
+- ✅ **Copy Speed:** 100-500 KB/s flash read → 1-10 MB/s SD write = 1-10s for 1MB
+
+**Recommendation:** ✅ **RECOMMENDED** - Best balance of reliability, performance, and flash longevity.
+
+#### Option 3: Flash Fallback Only
+Write to SD card during test; automatically switch to flash if SD card fails.
+
+**Pros:**
+- Normal operation uses SD card (higher endurance)
+- Flash only used on SD card failure
+- No performance impact when SD card works
+
+**Cons:**
+- Most complex logic (runtime switching)
+- Need to detect SD card failure mid-test
+- Requires maintaining two write paths in hot code
+
+**Feasibility Assessment:**
+- ⚠️ **Complexity:** High - requires fault detection and graceful failover
+- ✅ **Performance:** No impact when SD card working
+- ⚠️ **Reliability:** Failure detection may not catch all SD card errors
+
+**Recommendation:** Good for reliability, but higher implementation complexity.
+
+### Partition Requirements
+
+**Current partitions (from sdkconfig):**
+- `app` (factory): ~1MB
+- `otadata`: 8KB
+- `phy_init`: 4KB
+
+**Recommended new partition:**
+```
+# Add to partitions.csv
+test_data,data,ota,0x300000,0xD00000,
+```
+
+This allocates 13MB for test data storage at offset 3MB, allowing:
+- ~13,000 tests at 10 Hz
+- ~1,300 tests at 100 Hz
+- ~130 tests at 1000 Hz
+
+### API Design (Draft)
+
+```c
+// Flash backup API
+esp_err_t flash_backup_init(void);
+esp_err_t flash_backup_start_test(uint32_t test_id);
+esp_err_t flash_backup_write_sample(const adc_sample_t *sample);
+esp_err_t flash_backup_finish_test(void);
+esp_err_t flash_backup_copy_to_sd(void);  // Copy to SD card
+esp_err_t flash_backup_erase_old(void);   // Erase old data
+```
+
+### Settings File Additions
+
+```
+# Flash Backup Settings (Phase 5)
+FLASH_BACKUP_MODE          normal    # normal, fallback, concurrent
+FLASH_BACKUP_AUTO_COPY     true      # Auto-copy to SD after test
+FLASH_BACKUP_KEEP_DAYS     7         # Keep flash backups for N days
+FLASH_BACKUP_MIN_SPACE_MB  5         # Minimum free space before warning
+```
+
+### Implementation Priority
+
+**Phase 5.1 (Recommended First Step):**
+1. Implement Option 2 (Flash-Primary, Copy-to-SD)
+2. Add custom partition for test data
+3. Implement basic API
+4. Add settings configuration
+5. Integration with ENDTEST state
+
+**Phase 5.2 (Enhancement):**
+1. Implement Option 3 (Flash Fallback)
+2. Add SD card health monitoring
+3. Runtime switching logic
+
+**Phase 5.3 (Advanced - Not Recommended):**
+1. Implement Option 1 (Concurrent Writing)
+2. Only if specific use-case requires
+3. Add flash wear monitoring
+4. Consider industrial-grade flash with higher endurance
+
+### Conclusion
+
+**Recommended Approach:** Option 2 (Write to flash during test, copy to SD after)
+
+**Justification:**
+- ESP32-S3 has sufficient flash (16MB) and PSRAM (8MB) for buffering
+- Minimal impact on critical ADC sampling task (P7 priority)
+- Flash wear is manageable with erase-on-copy strategy
+- 1-10 second post-test copy delay is acceptable
+- Simpler implementation, higher reliability
+
+**Not Recommended:** Concurrent flash + SD writing due to flash endurance limitations and SPI bus contention.
 
 ---
 

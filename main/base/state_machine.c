@@ -15,15 +15,36 @@
 #include "safety.h"
 #include "rgb_led.h"
 #include "buzzer.h"
+#include "sd_logger.h"
+#include "settings.h"
+#include "adc_as1256.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <math.h>
 
 static const char *TAG = "state_machine";
 
 static volatile base_state_t s_current_state = STATE_INIT;
 static volatile bool s_test_mode = false;  /* Flag to disable auto-HALT during testing */
+
+/* Test flow state tracking */
+static struct {
+    bool test_active;
+    uint64_t test_start_time_us;
+    uint32_t test_sample_count;
+    float baseline_thrust;
+    float baseline_pressure;
+    float max_thrust;
+    float max_pressure;
+    float total_impulse;
+    uint32_t end_counter;
+    uint32_t post_burn_counter;
+    uint64_t last_sample_time_us;
+} s_test_data = {0};
 
 static const char *s_state_names[STATE_MAX] = {
     [STATE_INIT]                = "INIT",
@@ -151,9 +172,41 @@ static void handle_armed_exit(void)
 /* STARTTEST */
 static void handle_starttest_enter(void)
 {
-    ESP_LOGW(TAG, "STARTTEST: ADC/igniter not ready, halting");
-    /* Phase 2 ADC/igniter not implemented — immediately halt */
-    uint8_t cmd = CMD_HALT;
+    ESP_LOGI(TAG, "Entering STARTTEST state");
+
+    /* Get current settings */
+    const settings_t *settings = settings_get();
+    if (!settings) {
+        ESP_LOGE(TAG, "No settings available, halting");
+        uint8_t cmd = CMD_HALT;
+        xQueueSendToFront(state_event_queue, &cmd, 0);
+        return;
+    }
+
+    /* Initialize test data */
+    memset(&s_test_data, 0, sizeof(s_test_data));
+    s_test_data.test_active = true;
+    s_test_data.test_start_time_us = esp_timer_get_time();
+
+    /* Create CSV file with timestamp */
+    char timestamp[32];
+    snprintf(timestamp, sizeof(timestamp), "%llu", s_test_data.test_start_time_us);
+
+    esp_err_t ret = sd_logger_create_test_file(timestamp);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create test file, halting");
+        uint8_t cmd = CMD_HALT;
+        xQueueSendToFront(state_event_queue, &cmd, 0);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Test file created, igniter_on_time=%.1f", settings->igniter_on_time);
+
+    /* Transition to IGNITION after 1 second */
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    /* Send IGNITION command to self via queue */
+    uint8_t cmd = CMD_IGNITION;
     xQueueSendToFront(state_event_queue, &cmd, 0);
 }
 
@@ -204,6 +257,183 @@ static void handle_cal_pr_enter(void)
     rgb_led_set(255, 255, 0, LED_PATTERN_PULSE_HALF_HZ);  /* Yellow pulsing */
 }
 
+/* IGNITION */
+static void handle_ignition_enter(void)
+{
+    ESP_LOGI(TAG, "Entering IGNITION state");
+    rgb_led_set(255, 0, 0, LED_PATTERN_BLINK_2HZ);  /* Red blinking */
+    buzzer_play(BUZZER_PATTERN_ALARM);  /* Alert: igniting! */
+
+    /* Get settings */
+    const settings_t *settings = settings_get();
+    float igniter_time = settings ? settings->igniter_on_time : 1.0f;
+
+    ESP_LOGI(TAG, "Firing igniter for %.1f seconds", igniter_time);
+
+    /* Fire igniter: set GPIO high */
+    gpio_set_level(PIN_IGNITION, 1);
+    gpio_set_level(PIN_LOW_SIDE_POWER, 1);
+
+    /* Wait for igniter burn time */
+    int delay_ms = (int)(igniter_time * 1000);
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+
+    /* Turn off igniter */
+    gpio_set_level(PIN_IGNITION, 0);
+    gpio_set_level(PIN_LOW_SIDE_POWER, 0);
+
+    ESP_LOGI(TAG, "Igniter off, transitioning to TESTRUNNING");
+
+    /* Auto-transition to TESTRUNNING */
+    uint8_t cmd = CMD_START_RUNNING;
+    xQueueSendToFront(state_event_queue, &cmd, 0);
+}
+
+/* TESTRUNNING */
+static void handle_testrunning_enter(void)
+{
+    ESP_LOGI(TAG, "Entering TESTRUNNING state");
+    rgb_led_set(255, 255, 0, LED_PATTERN_SOLID);  /* Yellow = testing */
+    buzzer_stop();
+
+    /* Initialize test tracking */
+    s_test_data.test_sample_count = 0;
+    s_test_data.end_counter = 0;
+    s_test_data.post_burn_counter = 0;
+    s_test_data.last_sample_time_us = esp_timer_get_time();
+}
+
+static void handle_testrunning_run(void)
+{
+    safety_watchdog_feed();
+
+    /* Check for samples from ADC queue */
+    adc_sample_t sample;
+    while (xQueueReceive(adc_sample_queue, &sample, 0) == pdTRUE) {
+        /* Log sample to SD card */
+        sd_logger_write_sample(&sample);
+
+        /* Update test statistics */
+        s_test_data.test_sample_count++;
+        s_test_data.last_sample_time_us = sample.timestamp_us;
+
+        /* Calculate baseline from first 0.5 seconds (approx 50 samples at 10Hz) */
+        if (s_test_data.test_sample_count <= 50) {
+            /* Accumulate for baseline */
+            s_test_data.baseline_thrust += sample.loadcell_kg;
+            s_test_data.baseline_pressure += sample.pressure_bar;
+
+            if (s_test_data.test_sample_count == 50) {
+                /* Calculate average baseline */
+                s_test_data.baseline_thrust /= 50.0f;
+                s_test_data.baseline_pressure /= 50.0f;
+                ESP_LOGI(TAG, "Baseline: thrust=%.2fkg, pressure=%.2fbar",
+                         s_test_data.baseline_thrust, s_test_data.baseline_pressure);
+            }
+        } else {
+            /* Track max values */
+            if (sample.loadcell_kg > s_test_data.max_thrust) {
+                s_test_data.max_thrust = sample.loadcell_kg;
+            }
+            if (sample.pressure_bar > s_test_data.max_pressure) {
+                s_test_data.max_pressure = sample.pressure_bar;
+            }
+
+            /* Accumulate for impulse */
+            s_test_data.total_impulse += sample.loadcell_kg;
+
+            /* End-of-burn detection: 5% threshold for END_TEST_DELAY seconds */
+            const settings_t *settings = settings_get();
+            uint8_t end_delay = settings ? settings->end_test_delay : 5;
+            uint32_t confirm_samples = end_delay * 10;  /* 10 Hz sample rate */
+
+            float thrust_threshold = s_test_data.baseline_thrust * 0.05f;
+            float pressure_threshold = s_test_data.baseline_pressure * 0.05f;
+
+            bool thrust_at_baseline = fabs(sample.loadcell_kg - s_test_data.baseline_thrust) < thrust_threshold;
+            bool pressure_at_baseline = fabs(sample.pressure_bar - s_test_data.baseline_pressure) < pressure_threshold;
+
+            if (thrust_at_baseline && pressure_at_baseline) {
+                s_test_data.end_counter++;
+                ESP_LOGI(TAG, "At baseline: %lu/%lu samples",
+                         s_test_data.end_counter, confirm_samples);
+
+                if (s_test_data.end_counter >= confirm_samples) {
+                    /* Burn complete - move to post-burn logging */
+                    ESP_LOGI(TAG, "Burn complete, starting post-burn logging");
+                    s_test_data.post_burn_counter = 0;
+
+                    /* Continue logging for END_TEST_DELAY seconds */
+                    uint32_t post_burn_samples = confirm_samples;
+                    while (s_test_data.post_burn_counter < post_burn_samples) {
+                        if (xQueueReceive(adc_sample_queue, &sample, pdMS_TO_TICKS(100)) == pdTRUE) {
+                            sd_logger_write_sample(&sample);
+                            s_test_data.post_burn_counter++;
+                            s_test_data.test_sample_count++;
+                            s_test_data.total_impulse += sample.loadcell_kg;
+
+                            /* Update max values */
+                            if (sample.loadcell_kg > s_test_data.max_thrust) {
+                                s_test_data.max_thrust = sample.loadcell_kg;
+                            }
+                            if (sample.pressure_bar > s_test_data.max_pressure) {
+                                s_test_data.max_pressure = sample.pressure_bar;
+                            }
+                        }
+                        safety_watchdog_feed();
+                    }
+
+                    /* Transition to ENDTEST */
+                    uint8_t cmd = CMD_END_TEST;
+                    xQueueSendToFront(state_event_queue, &cmd, 0);
+                    return;
+                }
+            } else {
+                /* Reset counter if not at baseline */
+                s_test_data.end_counter = 0;
+            }
+        }
+    }
+
+    /* Feeding watchdog already done at start */
+}
+
+/* ENDTEST */
+static void handle_endtest_enter(void)
+{
+    ESP_LOGI(TAG, "Entering ENDTEST state");
+    rgb_led_set(0, 255, 0, LED_PATTERN_SOLID);  /* Green = complete */
+    buzzer_play(BUZZER_PATTERN_DOUBLE_BEEP);  /* Success beep */
+
+    /* Calculate test duration */
+    uint64_t end_time_us = esp_timer_get_time();
+    float duration = (end_time_us - s_test_data.test_start_time_us) / 1000000.0f;
+
+    ESP_LOGI(TAG, "Test duration: %.3f seconds", duration);
+    ESP_LOGI(TAG, "Max thrust: %.3f kg, Max pressure: %.3f bar",
+             s_test_data.max_thrust, s_test_data.max_pressure);
+    ESP_LOGI(TAG, "Total impulse: %.3f kg*s, Samples: %lu",
+             s_test_data.total_impulse, s_test_data.test_sample_count);
+
+    /* Write summary to SD card */
+    sd_logger_write_summary(duration, s_test_data.max_thrust,
+                           s_test_data.total_impulse, s_test_data.max_pressure);
+
+    /* Close CSV file */
+    sd_logger_close();
+
+    /* Clear test active flag */
+    s_test_data.test_active = false;
+
+    ESP_LOGI(TAG, "Test complete, file closed");
+
+    /* Auto-transition to IDLE after 2 seconds */
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    uint8_t cmd = CMD_TO_IDLE;
+    xQueueSendToFront(state_event_queue, &cmd, 0);
+}
+
 /* WELCOME_SCREEN */
 static uint32_t s_welcome_ticks = 0;
 
@@ -241,9 +471,9 @@ static const state_handlers_t s_handlers[STATE_MAX] = {
     [STATE_IDLE]                = { handle_idle_enter,       handle_idle_run,     handler_stub },
     [STATE_ARMED]               = { handle_armed_enter,      handle_generic_run, handle_armed_exit },
     [STATE_STARTTEST]           = { handle_starttest_enter,  handle_generic_run, handler_stub },
-    [STATE_IGNITION]            = { handler_stub,            handle_generic_run, handler_stub },
-    [STATE_TESTRUNNING]         = { handler_stub,            handle_generic_run, handler_stub },
-    [STATE_ENDTEST]             = { handler_stub,            handle_generic_run, handler_stub },
+    [STATE_IGNITION]            = { handle_ignition_enter,   handle_generic_run, handler_stub },
+    [STATE_TESTRUNNING]         = { handle_testrunning_enter,handle_testrunning_run,handler_stub },
+    [STATE_ENDTEST]             = { handle_endtest_enter,    handle_generic_run, handler_stub },
     [STATE_HALT]                = { handle_halt_enter,       handle_halt_run,     handle_halt_exit },
     [STATE_CHECK_IGNITER]       = { handle_chk_ign_enter,    handle_generic_run, handler_stub },
     [STATE_CHECK_BREAKWIRES]    = { handle_chk_brk_enter,    handle_generic_run, handler_stub },
@@ -433,6 +663,17 @@ void state_machine_task(void *pvParameters)
                         break;
                 }
 
+            } else if (event == CMD_BTN_SHORT_PRESS) {
+                switch (s_current_state) {
+                    case STATE_IDLE:
+                        /* Short press in IDLE while SAFE goes to igniter check */
+                        transition_to(STATE_CHECK_IGNITER);
+                        break;
+                    default:
+                        /* Short press has no effect in other states */
+                        break;
+                }
+
             } else if (event == CMD_BTN_LONG_PRESS) {
                 switch (s_current_state) {
                     case STATE_ARMED:
@@ -451,6 +692,30 @@ void state_machine_task(void *pvParameters)
                         break;
                     default:
                         break;
+                }
+
+            } else if (event == CMD_IGNITION) {
+                /* Internal: transition to IGNITION state */
+                if (s_current_state == STATE_STARTTEST) {
+                    transition_to(STATE_IGNITION);
+                }
+
+            } else if (event == CMD_START_RUNNING) {
+                /* Internal: transition to TESTRUNNING state */
+                if (s_current_state == STATE_IGNITION) {
+                    transition_to(STATE_TESTRUNNING);
+                }
+
+            } else if (event == CMD_END_TEST) {
+                /* Internal: transition to ENDTEST state */
+                if (s_current_state == STATE_TESTRUNNING) {
+                    transition_to(STATE_ENDTEST);
+                }
+
+            } else if (event == CMD_TO_IDLE) {
+                /* Internal: transition to IDLE state */
+                if (s_current_state == STATE_ENDTEST) {
+                    transition_to(STATE_IDLE);
                 }
             }
         }
